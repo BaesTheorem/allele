@@ -12,8 +12,10 @@ than picking one.
 """
 
 from .base import Annotation, AnnotationSource, SourceInfo
+from .alphamissense import AlphaMissense
 from .clinvar import ClinVar
 from .cpic import Cpic
+from .gnomad import Gnomad
 from .gwas import GwasCatalog
 from .snpedia import SNPedia
 
@@ -21,8 +23,10 @@ __all__ = [
     "Annotation",
     "AnnotationSource",
     "SourceInfo",
+    "AlphaMissense",
     "ClinVar",
     "Cpic",
+    "Gnomad",
     "GwasCatalog",
     "SNPedia",
 ]

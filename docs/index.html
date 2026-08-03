@@ -168,8 +168,10 @@ async function handle(file) {
     say(`Reading ${file.name}…`, 35);
     const text = await readText(file);
     say('Parsing…', 45);
-    const sample = await Allele.parseFile(text, m => say(m, 55));
+    let sample = await Allele.parseFile(text, m => say(m, 55));
     if (!sample.calls.length) throw new Error('No genotypes found in this file.');
+    say('Verifying genome build…', 70);
+    sample = Allele.verifyBuild(sample, bundle);
     say(`Annotating ${sample.calls.length.toLocaleString()} variants…`, 75);
     await new Promise(r => setTimeout(r, 0));
     const result = Allele.annotate(sample, bundle);

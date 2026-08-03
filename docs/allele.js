@@ -362,10 +362,55 @@ class Bundle {
   }
 }
 
-// Note: the browser trusts the header's build. Coordinate-based verification
-// (see builds.py) needs per-variant positions, which the bundle omits to stay
-// small. The CLI does verify. Matching is by rsID, so a wrong build label does
-// not misroute annotations; it only affects which duplicate rows are preferred.
+// Headers lie. A real Promethease report was seen declaring build 37 while
+// carrying GRCh38 coordinates. Both ClinVar assemblies are in the bundle, so
+// any variant whose position differs between them is a discriminating probe.
+function detectBuild(sample, bundle) {
+  const probes = new Map();
+  for (const row of bundle.clinvar.rows) {
+    const rs = row[0], build = row[7], pos = row[8];
+    if (!build || !pos) continue;
+    let entry = probes.get(rs);
+    if (!entry) { entry = {}; probes.set(rs, entry); }
+    entry[build] = pos;
+  }
+  const votes = {37: 0, 38: 0};
+  let checked = 0;
+  for (const call of sample.calls) {
+    if (checked >= 400) break;
+    if (!call.pos || !call.rsid) continue;
+    const rs = Bundle.rsNum(call.rsid);
+    const entry = rs === null ? null : probes.get(rs);
+    if (!entry || !entry[37] || !entry[38] || entry[37] === entry[38]) continue;
+    checked++;
+    if (call.pos === entry[37]) votes[37]++;
+    else if (call.pos === entry[38]) votes[38]++;
+  }
+  const total = votes[37] + votes[38];
+  if (total < 20) return {build: null, votes, total};
+  const winner = votes[37] >= votes[38] ? 37 : 38;
+  if (votes[winner] / total < 0.8) return {build: null, votes, total};
+  return {build: winner, votes, total};
+}
+
+function verifyBuild(sample, bundle) {
+  const result = detectBuild(sample, bundle);
+  if (result.build === null) return sample;
+  if (sample.build === null) {
+    sample.warnings.push(`No build declared; inferred GRCh${result.build} from coordinates ` +
+      `(${result.votes[result.build]}/${result.total} probes agree).`);
+  } else if (sample.build !== result.build) {
+    sample.warnings.push(`Header declares build ${sample.build} but the coordinates match ` +
+      `GRCh${result.build} (${result.votes[result.build]}/${result.total} probes). ` +
+      'Using the coordinates, since that is what annotation joins on.');
+  } else {
+    return sample;
+  }
+  sample.build = result.build;
+  for (const call of sample.calls) call.build = result.build;
+  return sample;
+}
+
 function annotate(sample, bundle, onProgress) {
   const findings = [];
   const seenCpicGenes = new Set();
@@ -524,4 +569,4 @@ function scoreOf(annotations) {
   return best;
 }
 
-window.Allele = { parseFile, annotate, Bundle, ZYG };
+window.Allele = { parseFile, annotate, verifyBuild, detectBuild, Bundle, ZYG };

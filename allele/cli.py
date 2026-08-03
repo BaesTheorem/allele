@@ -25,7 +25,7 @@ def _progress(message: str) -> None:
 
 
 def cmd_db(args: argparse.Namespace) -> int:
-    from .sources import clinvar, cpic, gwas
+    from .sources import alphamissense, clinvar, cpic, gnomad, gwas
 
     directory = Path(args.data_dir) if args.data_dir else DEFAULT_DIR
     downloads = directory / "downloads"
@@ -69,17 +69,29 @@ def cmd_db(args: argparse.Namespace) -> int:
     if not args.only or args.only == "cpic":
         count = cpic.build_index(conn, _progress)
         print(f"  CPIC: {count:,} variant-drug pairs", file=sys.stderr)
+    # Enrichment sources are GRCh38-only and slower, so they are opt-in.
+    if args.only == "gnomad":
+        count = gnomad.build_index(conn, _progress)
+        print(f"  gnomAD: {count:,} frequencies", file=sys.stderr)
+    if args.only == "alphamissense":
+        count = alphamissense.build_index(conn, downloads, _progress)
+        print(f"  AlphaMissense: {count:,} predictions", file=sys.stderr)
     finalize(conn)
     print("Done.", file=sys.stderr)
     return 0
 
 
 def _build_sources(conn, snpedia_report: str | None) -> list:
-    from .sources import ClinVar, Cpic, GwasCatalog, SNPedia
+    from .sources import AlphaMissense, ClinVar, Cpic, Gnomad, GwasCatalog, SNPedia
 
     sources: list = []
+    # gnomAD is an enricher, not a source of findings: it supplies the
+    # frequency the plausibility checks need rather than producing its own.
+    frequencies = Gnomad(conn) if is_populated(conn, "gnomad") else None
     if is_populated(conn, "clinvar"):
-        sources.append(ClinVar(conn))
+        sources.append(ClinVar(conn, frequencies=frequencies))
+    if is_populated(conn, "alphamissense"):
+        sources.append(AlphaMissense(conn))
     if is_populated(conn, "gwas"):
         sources.append(GwasCatalog(conn))
     if is_populated(conn, "cpic"):
@@ -210,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     db = subparsers.add_parser("db", help="manage annotation databases")
     db.add_argument("action", choices=["update", "status", "clean", "path"])
     db.add_argument("--build", type=int, default=37, choices=[37, 38])
-    db.add_argument("--only", choices=["clinvar", "gwas", "cpic"])
+    db.add_argument("--only", choices=["clinvar", "gwas", "cpic", "gnomad", "alphamissense"])
     db.set_defaults(func=cmd_db)
 
     report = subparsers.add_parser("report", help="annotate a DNA export and write HTML")

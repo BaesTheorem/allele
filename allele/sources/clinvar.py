@@ -163,8 +163,15 @@ class ClinVar:
 
     name = "clinvar"
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, frequencies=None):
+        """`frequencies` is an optional gnomAD-style provider.
+
+        ClinVar's own AF fields cover only about 12% of notable variants, which
+        is why the plausibility checks otherwise have to infer rarity from
+        absence. A real frequency, where one exists, is strictly better.
+        """
         self.conn = conn
+        self.frequencies = frequencies
 
     def info(self) -> SourceInfo:
         row = self.conn.execute(
@@ -210,6 +217,15 @@ class ClinVar:
             # variant existing at your rsID means nothing unless you carry it.
             zygosity = zygosity_for(call.genotype, row["alt"], call.chrom)
 
+            # Prefer a measured frequency over ClinVar's sparse AF fields.
+            frequency = row["frequency"]
+            frequency_source = "ClinVar AF"
+            if self.frequencies is not None:
+                measured = self.frequencies.frequency(row["chrom"], row["pos"], row["alt"])
+                if measured is not None:
+                    frequency = measured
+                    frequency_source = "gnomAD"
+
             flags: list[str] = []
             stars = stars_for(row["review"])
             if stars is not None and stars == 0:
@@ -218,15 +234,17 @@ class ClinVar:
                 flags.append(f"build mismatch: call is {call.build}, ClinVar row is {row['build']}")
 
             implausible, explanation = plausibility_common_pathogenic(
-                row["frequency"], row["significance"]
+                frequency, row["significance"]
             )
             if not implausible:
-                implausible, explanation = plausibility(zygosity, row["frequency"])
-            if not implausible and row["frequency"] is None:
+                implausible, explanation = plausibility(zygosity, frequency)
+            if not implausible and frequency is None:
                 implausible, explanation = plausibility_unknown_frequency(
                     zygosity, row["significance"]
                 )
             if implausible and explanation:
+                if frequency is not None:
+                    explanation += f" (frequency from {frequency_source})"
                 flags.append(f"{FLAG_IMPLAUSIBLE}: {explanation}")
 
             conditions = tuple(
@@ -247,7 +265,7 @@ class ClinVar:
                     review_stars=stars,
                     zygosity=zygosity,
                     genotype=call.genotype,
-                    frequency=row["frequency"],
+                    frequency=frequency,
                     flags=tuple(flags),
                 )
             )

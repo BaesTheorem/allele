@@ -39,6 +39,26 @@ CREATE TABLE IF NOT EXISTS clinvar (
     frequency    REAL
 );
 
+CREATE TABLE IF NOT EXISTS gnomad (
+    chrom     TEXT NOT NULL,
+    pos       INTEGER NOT NULL,
+    build     INTEGER NOT NULL,
+    ref       TEXT,
+    alt       TEXT,
+    af        REAL,
+    af_grpmax REAL
+);
+
+CREATE TABLE IF NOT EXISTS alphamissense (
+    chrom     TEXT NOT NULL,
+    pos       INTEGER NOT NULL,
+    build     INTEGER NOT NULL,
+    ref       TEXT,
+    alt       TEXT,
+    score     REAL,
+    class     TEXT
+);
+
 CREATE TABLE IF NOT EXISTS cpic (
     rsid         TEXT NOT NULL,
     gene         TEXT,
@@ -75,6 +95,8 @@ CREATE INDEX IF NOT EXISTS idx_clinvar_rsid ON clinvar(rsid);
 CREATE INDEX IF NOT EXISTS idx_clinvar_rsid_build ON clinvar(rsid, build);
 CREATE INDEX IF NOT EXISTS idx_gwas_rsid ON gwas(rsid);
 CREATE INDEX IF NOT EXISTS idx_cpic_rsid ON cpic(rsid);
+CREATE INDEX IF NOT EXISTS idx_gnomad_pos ON gnomad(chrom, pos, alt);
+CREATE INDEX IF NOT EXISTS idx_am_pos ON alphamissense(chrom, pos, alt);
 """
 
 

@@ -64,7 +64,7 @@ def build_clinvar(conn) -> dict:
     significances = Strings()
     rows: list[list] = []
 
-    query = ("SELECT rsid, alt, significance, review, conditions, genes, frequency, build "
+    query = ("SELECT rsid, alt, significance, review, conditions, genes, frequency, build, pos "
              "FROM clinvar")
     for row in conn.execute(query):
         if not is_notable(row["significance"]):
@@ -96,11 +96,12 @@ def build_clinvar(conn) -> dict:
             conditions.add(primary),
             genes.add(gene),
             row["build"],
+            row["pos"] or 0,
         ])
 
     rows.sort(key=lambda r: r[0])
     return {
-        "columns": ["rs", "alt", "sig", "stars", "freq", "cond", "gene", "build"],
+        "columns": ["rs", "alt", "sig", "stars", "freq", "cond", "gene", "build", "pos"],
         "significance": significances.items,
         "conditions": conditions.items,
         "genes": genes.items,
