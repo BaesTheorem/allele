@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS clinvar (
     frequency    REAL
 );
 
+CREATE TABLE IF NOT EXISTS cpic (
+    rsid         TEXT NOT NULL,
+    gene         TEXT,
+    variant_name TEXT,
+    drug         TEXT,
+    level        TEXT,
+    guideline    TEXT,
+    url          TEXT
+);
+
 CREATE TABLE IF NOT EXISTS gwas (
     rsid        TEXT NOT NULL,
     risk_allele TEXT,
@@ -62,7 +72,9 @@ CREATE TABLE IF NOT EXISTS gwas (
 
 INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_clinvar_rsid ON clinvar(rsid);
+CREATE INDEX IF NOT EXISTS idx_clinvar_rsid_build ON clinvar(rsid, build);
 CREATE INDEX IF NOT EXISTS idx_gwas_rsid ON gwas(rsid);
+CREATE INDEX IF NOT EXISTS idx_cpic_rsid ON cpic(rsid);
 """
 
 
@@ -83,11 +95,22 @@ def finalize(conn: sqlite3.Connection) -> None:
 
 
 def replace_table(
-    conn: sqlite3.Connection, table: str, columns: list[str], rows: Iterable[tuple]
+    conn: sqlite3.Connection,
+    table: str,
+    columns: list[str],
+    rows: Iterable[tuple],
+    where: tuple[str, tuple] | None = None,
 ) -> int:
-    """Swap a table's contents for a fresh load, counting what went in."""
+    """Swap a table's contents for a fresh load, counting what went in.
+
+    `where` scopes the delete, so ClinVar can hold GRCh37 and GRCh38 side by
+    side and rebuilding one build does not wipe the other.
+    """
     placeholders = ",".join("?" * len(columns))
-    conn.execute(f"DELETE FROM {table}")
+    if where:
+        conn.execute(f"DELETE FROM {table} WHERE {where[0]}", where[1])
+    else:
+        conn.execute(f"DELETE FROM {table}")
     count = 0
 
     def counted() -> Iterator[tuple]:

@@ -95,6 +95,11 @@ def detect_format(comments: list[str], first_data_line: str) -> str:
         return "myheritage"
     if "living dna" in header or "livingdna" in header:
         return "livingdna"
+    # Most specific first: FamFinder headers also contain "family tree dna".
+    if "famfinder" in header:
+        return "ftdna-famfinder"
+    if "myhappygenes" in header or "tempus" in header:
+        return "myhappygenes"
     if "ftdna" in header or "family tree dna" in header or "familytreedna" in header:
         return "ftdna"
 
@@ -102,7 +107,10 @@ def detect_format(comments: list[str], first_data_line: str) -> str:
     if lower_first.startswith("rsid,chromosome,position,result"):
         return "ftdna"  # also MyHeritage; both parse identically
     if lower_first.startswith("rsid\tchromosome\tposition\tallele1"):
-        return "ancestrydna"
+        # FamFinder uses the same header; the vendor header line disambiguates.
+        return "ftdna-famfinder" if "famfinder" in header else "ancestrydna"
+    if lower_first.startswith("rsid\tchromosome\tposition\tresult"):
+        return "ftdna-illumina"
     if lower_first.startswith("rsid"):
         return "generic"
 
@@ -170,6 +178,7 @@ def _iter_vcf_rows(handle: io.TextIOBase, warnings: list[str]) -> tuple[list[Cal
     calls: list[Call] = []
     build: int | None = None
     skipped_multisample = False
+    gvcf_blocks = 0
 
     for line in handle:
         if line.startswith("##"):
@@ -192,6 +201,12 @@ def _iter_vcf_rows(handle: io.TextIOBase, warnings: list[str]) -> tuple[list[Cal
         chrom = normalize_chromosome(fields[0])
         rsid = fields[2]
         ref, alt_field = fields[3], fields[4]
+
+        # gVCF reference blocks (<NON_REF> with an END= span) assert only that a
+        # region matched the reference. They are not variant calls.
+        if "<NON_REF>" in alt_field or "<*>" in alt_field:
+            gvcf_blocks += 1
+            continue
         fmt_keys = fields[8].split(":")
         sample_values = fields[9].split(":")
 
@@ -236,6 +251,11 @@ def _iter_vcf_rows(handle: io.TextIOBase, warnings: list[str]) -> tuple[list[Cal
             )
         )
 
+    if gvcf_blocks:
+        warnings.append(
+            f"{gvcf_blocks:,} gVCF reference block(s) skipped; they assert reference "
+            "match over a span rather than a genotype call"
+        )
     return calls, build
 
 

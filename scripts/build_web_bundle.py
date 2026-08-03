@@ -64,7 +64,8 @@ def build_clinvar(conn) -> dict:
     significances = Strings()
     rows: list[list] = []
 
-    query = "SELECT rsid, alt, significance, review, conditions, genes, frequency FROM clinvar"
+    query = ("SELECT rsid, alt, significance, review, conditions, genes, frequency, build "
+             "FROM clinvar")
     for row in conn.execute(query):
         if not is_notable(row["significance"]):
             continue
@@ -94,11 +95,12 @@ def build_clinvar(conn) -> dict:
             round(row["frequency"], 6) if row["frequency"] is not None else -1,
             conditions.add(primary),
             genes.add(gene),
+            row["build"],
         ])
 
     rows.sort(key=lambda r: r[0])
     return {
-        "columns": ["rs", "alt", "sig", "stars", "freq", "cond", "gene"],
+        "columns": ["rs", "alt", "sig", "stars", "freq", "cond", "gene", "build"],
         "significance": significances.items,
         "conditions": conditions.items,
         "genes": genes.items,
@@ -156,6 +158,36 @@ def build_gwas(conn) -> dict:
     }
 
 
+def build_cpic(conn) -> dict:
+    """CPIC is only ~14k rows, so the browser gets all of it."""
+    genes, drugs, guidelines = Strings(), Strings(), Strings()
+    rows: list[list] = []
+    try:
+        query = "SELECT rsid, gene, drug, level, guideline, url FROM cpic"
+        cursor = conn.execute(query)
+    except Exception:
+        return {"columns": [], "genes": [], "drugs": [], "guidelines": [], "rows": []}
+    for row in cursor:
+        number = rs_number(row["rsid"])
+        if number is None:
+            continue
+        rows.append([
+            number,
+            genes.add(row["gene"]),
+            drugs.add(row["drug"]),
+            row["level"] or "",
+            guidelines.add(row["url"] or ""),
+        ])
+    rows.sort(key=lambda r: r[0])
+    return {
+        "columns": ["rs", "gene", "drug", "level", "url"],
+        "genes": genes.items,
+        "drugs": drugs.items,
+        "guidelines": guidelines.items,
+        "rows": rows,
+    }
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     conn = connect()
@@ -172,7 +204,17 @@ def main() -> int:
     path.write_text(json.dumps(gwas, separators=(",", ":")), encoding="utf-8")
     print(f"  {len(gwas['rows']):,} rows -> {path.stat().st_size / 1e6:.1f} MB")
 
+    print("building cpic bundle...")
+    cpic = build_cpic(conn)
+    path = OUT / "cpic.json"
+    path.write_text(json.dumps(cpic, separators=(",", ":")), encoding="utf-8")
+    print(f"  {len(cpic['rows']):,} rows -> {path.stat().st_size / 1e6:.1f} MB")
+
     manifest = {
+        "cpic": {
+            "rows": len(cpic["rows"]),
+            "license": "CPIC, free to use",
+        },
         "clinvar": {
             "rows": len(clinvar["rows"]),
             "min_review_stars": MIN_STARS,
@@ -184,7 +226,7 @@ def main() -> int:
             "license": "NHGRI-EBI GWAS Catalog, free with attribution",
         },
     }
-    for name, info in (("clinvar", "clinvar"), ("gwas", "gwas")):
+    for name, info in (("clinvar", "clinvar"), ("gwas", "gwas"), ("cpic", "cpic")):
         row = conn.execute(
             "SELECT release, downloaded FROM provenance WHERE source=?", (info,)
         ).fetchone()

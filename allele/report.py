@@ -49,6 +49,7 @@ background:var(--low);padding:14px 16px;margin:0 0 10px}
 .card.clinical{border-left-color:var(--bad)}
 .card.trait{border-left-color:var(--accent)}
 .card.curated{border-left-color:var(--good)}
+.card.pharmacogenomic{border-left-color:var(--accent)}
 .card.demoted{border-left-color:var(--warn);background:var(--mid)}
 .head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
 .rsid{font-weight:500;font-size:15px}
@@ -89,6 +90,7 @@ def _finding_card(finding: Finding, demoted: bool = False) -> str:
     categories = {a.category for a in finding.annotations}
     kind = (
         "clinical" if "clinical" in categories
+        else "pharmacogenomic" if "pharmacogenomic" in categories
         else "curated" if "curated" in categories
         else "trait"
     )
@@ -218,7 +220,11 @@ def render(report: Report, title: str = "Allele report") -> str:
     warnings = "".join(f'<div class="flag">{_e(w)}</div>' for w in sample.warnings)
 
     clinical = [f for f in report.credible if any(a.category == "clinical" for a in f.annotations)]
-    others = [f for f in report.credible if f not in clinical]
+    pharma = [
+        f for f in report.credible
+        if f not in clinical and any(a.category == "pharmacogenomic" for a in f.annotations)
+    ]
+    others = [f for f in report.credible if f not in clinical and f not in pharma]
 
     def section(heading: str, items: list[Finding], demoted: bool = False, limit: int | None = None) -> str:
         if not items:
@@ -259,6 +265,7 @@ counselor or doctor.</div>
 {warnings}
 
 {section("Clinical significance", clinical)}
+{section("Medication guidance", pharma)}
 {section("Traits and associations", others, limit=200)}
 
 {f'<h2>Demoted as likely artifacts<span class="n">{len(report.artifacts):,}</span></h2>{demoted_note}' + "".join(_finding_card(f, True) for f in report.artifacts) if report.artifacts else ""}

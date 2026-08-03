@@ -137,8 +137,17 @@ def build_index(
         "rsid", "chrom", "pos", "build", "ref", "alt",
         "significance", "review", "conditions", "genes", "frequency",
     ]
-    count = replace_table(conn, "clinvar", columns, _iter_records(path, build))
-    record_provenance(conn, "clinvar", f"GRCh{build}", URLS[build], LICENSE, count)
+    count = replace_table(
+        conn, "clinvar", columns, _iter_records(path, build),
+        where=("build = ?", (build,)),
+    )
+    total = conn.execute("SELECT COUNT(*) FROM clinvar").fetchone()[0]
+    builds = [r[0] for r in conn.execute("SELECT DISTINCT build FROM clinvar ORDER BY build")]
+    record_provenance(
+        conn, "clinvar",
+        "GRCh" + "+GRCh".join(str(b) for b in builds),
+        URLS[build], LICENSE, total,
+    )
     return count
 
 
@@ -175,9 +184,22 @@ class ClinVar:
     def lookup(self, call: Call) -> list[Annotation]:
         if not call.rsid or not call.usable:
             return []
-        rows = self.conn.execute(
-            "SELECT * FROM clinvar WHERE rsid = ?", (call.rsid,)
-        ).fetchall()
+        # Only consider rows for the build this file declares. Mixing builds
+        # silently compares positions from different coordinate systems.
+        if call.build:
+            rows = self.conn.execute(
+                "SELECT * FROM clinvar WHERE rsid = ? AND build = ?", (call.rsid, call.build)
+            ).fetchall()
+            if not rows:
+                # rsIDs are build-independent, so fall back rather than lose the
+                # variant; the build-mismatch flag below marks what happened.
+                rows = self.conn.execute(
+                    "SELECT * FROM clinvar WHERE rsid = ?", (call.rsid,)
+                ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM clinvar WHERE rsid = ?", (call.rsid,)
+            ).fetchall()
 
         out: list[Annotation] = []
         for row in rows:

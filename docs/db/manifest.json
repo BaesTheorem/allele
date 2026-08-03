@@ -1,9 +1,15 @@
 {
+  "cpic": {
+    "rows": 13652,
+    "license": "CPIC, free to use",
+    "release": "api",
+    "downloaded": "2026-08-03"
+  },
   "clinvar": {
-    "rows": 137306,
+    "rows": 274622,
     "min_review_stars": 1,
     "license": "Public domain (NCBI ClinVar)",
-    "release": "GRCh37",
+    "release": "GRCh37+GRCh38",
     "downloaded": "2026-08-03"
   },
   "gwas": {

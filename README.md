@@ -8,8 +8,12 @@ runs in the browser tab, no upload, no server.
 
 ```bash
 pip install -e .
-allele db update                       # one-time, downloads ClinVar + GWAS Catalog
-allele report ~/Downloads/genome.txt   # writes genome.report.html
+allele db update --build 37 && allele db update --build 38   # both assemblies
+allele report ~/Downloads/genome.txt                          # writes HTML
+allele report genome.txt -f json -o r.json                    # or JSON / VCF
+allele report genome.txt --panel my_snps.txt                  # restrict to a panel
+allele diff old.json new.json                                 # what ClinVar changed
+allele db status | allele db path | allele db clean
 ```
 
 ## Inputs
@@ -33,6 +37,7 @@ tab-delimited data in files named `.csv`. Plain, gzipped and zipped all work.
 |---|---|---|
 | [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) | 2,664,744 rsID-bearing SNVs | Public domain |
 | [GWAS Catalog](https://www.ebi.ac.uk/gwas/) | 847,508 associations, 341,074 variants | Free, attribution |
+| [CPIC](https://cpicpgx.org) | 979 variants, 19 genes, levels A/B | Free |
 | [SNPedia](https://www.snpedia.com) | 43,779 variants | CC BY-NC-SA, read from your own report |
 
 SNPedia is never downloaded or redistributed. The only route that respects its
@@ -104,8 +109,13 @@ flagged rather than guessed.
 a layout artifact. Without normalizing, one person's two exports disagree at
 every Y and MT site. X is left alone, because collapsing it means inferring sex.
 
-**Build.** A header with no declared assembly warns rather than defaulting to 37
-and being quietly wrong on a build 38 file.
+**Build.** Headers lie. Both ClinVar assemblies are indexed, so any variant
+whose GRCh37 and GRCh38 positions differ becomes a probe: a sample of the file's
+own coordinates is checked against both, and the coordinates win over the header
+when they disagree. On the first real file tested, a Promethease report
+declaring `reference: 37` turned out to carry GRCh38 coordinates, 86 probes to
+0. Matching is by rsID so annotations were unaffected, but any position-based
+logic would have been off by megabases.
 
 **Carriage.** A variant is only a finding if you carry the allele. A pathogenic
 variant you do not have is not a result.

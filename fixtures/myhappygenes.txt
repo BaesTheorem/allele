@@ -1,0 +1,6 @@
+# MyHappyGenes raw data export (Tempus)
+# build 37.1
+rsid	chromosome	position	allele1	allele2
+rs4477212	1	82154	A	A
+rs3094315	1	752566	A	G
+rs4988235	2	136608646	C	T

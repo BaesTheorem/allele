@@ -338,11 +338,13 @@ function plausibility(zygosity, frequency, significance) {
 }
 
 class Bundle {
-  constructor(clinvar, gwas) {
+  constructor(clinvar, gwas, cpic) {
     this.clinvar = clinvar;
     this.gwas = gwas;
+    this.cpic = cpic || {rows: [], genes: [], drugs: [], guidelines: []};
     this.clinvarIndex = Bundle.index(clinvar.rows);
     this.gwasIndex = Bundle.index(gwas.rows);
+    this.cpicIndex = Bundle.index(this.cpic.rows);
   }
   static index(rows) {
     const map = new Map();
@@ -360,8 +362,13 @@ class Bundle {
   }
 }
 
+// Note: the browser trusts the header's build. Coordinate-based verification
+// (see builds.py) needs per-variant positions, which the bundle omits to stay
+// small. The CLI does verify. Matching is by rsID, so a wrong build label does
+// not misroute annotations; it only affects which duplicate rows are preferred.
 function annotate(sample, bundle, onProgress) {
   const findings = [];
+  const seenCpicGenes = new Set();
   let considered = 0;
 
   for (const call of sample.calls) {
@@ -372,7 +379,10 @@ function annotate(sample, bundle, onProgress) {
 
     if (rs !== null) {
       for (const i of bundle.clinvarIndex.get(rs) || []) {
-        const [, alt, sigIdx, stars, freq, condIdx, geneIdx] = bundle.clinvar.rows[i];
+        const [, alt, sigIdx, stars, freq, condIdx, geneIdx, rowBuild] = bundle.clinvar.rows[i];
+        // Positions from different assemblies are not comparable; prefer rows
+        // matching the file's build when it declares one.
+        if (call.build && rowBuild && call.build !== rowBuild) continue;
         const zygosity = zygosityFor(call.g, alt);
         if (zygosity === ZYG.ABSENT || zygosity === ZYG.UNKNOWN) continue;
         const significance = bundle.clinvar.significance[sigIdx] || '';
@@ -417,6 +427,28 @@ function annotate(sample, bundle, onProgress) {
           note: 'association only, not a diagnosis',
         });
       }
+
+      // CPIC: gene-level prescribing guidance.
+      for (const i of bundle.cpicIndex.get(rs) || []) {
+        const [, geneIdx, drugIdx, level, urlIdx] = bundle.cpic.rows[i];
+        const gene = bundle.cpic.genes[geneIdx];
+        if (seenCpicGenes.has(gene)) continue;
+        seenCpicGenes.add(gene);
+        const drugs = (bundle.cpicIndex.get(rs) || [])
+          .map(j => bundle.cpic.drugs[bundle.cpic.rows[j][2]])
+          .filter((d, k, arr) => d && arr.indexOf(d) === k);
+        annotations.push({
+          source: 'cpic', category: 'pharmacogenomic',
+          title: `${gene}: prescribing guidance exists for ${drugs.slice(0, 6).join(', ')}` +
+            (drugs.length > 6 ? ` and ${drugs.length - 6} more` : ''),
+          significance: `CPIC level ${level}`,
+          genes: [gene], conditions: drugs,
+          zygosity: call.g.length === 1 ? ZYG.HEMI : (call.g[0] !== call.g[1] ? ZYG.HET : ZYG.HOM),
+          url: urlIdx >= 0 ? bundle.cpic.guidelines[urlIdx] : null,
+          flag: 'gene-level match: a guideline exists for this gene, not that your ' +
+            'specific genotype changes a dose. Star-allele diplotypes cannot be called from array data.',
+        });
+      }
     }
 
     const curated = sample.curation && sample.curation[call.rsid];
@@ -450,7 +482,7 @@ function annotate(sample, bundle, onProgress) {
     const material = annotations.some(a =>
       (a.source === 'clinvar' && (a.stars === null || a.stars >= 1)) ||
       (a.source === 'snpedia' && a.magnitude >= MIN_MAGNITUDE) ||
-      (a.source === 'gwas'));
+      (a.source === 'gwas') || (a.source === 'cpic'));
     if (!material) continue;
 
     const flags = annotations.map(a => a.flag).filter(Boolean);

@@ -3,6 +3,7 @@
 Three, deliberately different in kind:
 
 - ClinVar    clinical significance, curated by submitters and expert panels
+- CPIC       pharmacogenomic prescribing guidance, gene level
 - GWAS       statistical trait associations from published studies
 - SNPedia    subjective interest grading from a wiki, via your own report
 
@@ -12,6 +13,7 @@ than picking one.
 
 from .base import Annotation, AnnotationSource, SourceInfo
 from .clinvar import ClinVar
+from .cpic import Cpic
 from .gwas import GwasCatalog
 from .snpedia import SNPedia
 
@@ -20,6 +22,7 @@ __all__ = [
     "AnnotationSource",
     "SourceInfo",
     "ClinVar",
+    "Cpic",
     "GwasCatalog",
     "SNPedia",
 ]

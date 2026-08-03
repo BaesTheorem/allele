@@ -82,7 +82,12 @@ class Annotation:
 
     @property
     def applies(self) -> bool:
-        """True when the person actually carries the allele in question."""
+        """True when the statement is about a variant this person has.
+
+        For ClinVar and GWAS this means carrying the specific allele. CPIC
+        guidance is gene-level, so having any genotype at a guideline variant
+        is what makes it relevant.
+        """
         return self.zygosity in (ZYGOSITY_HET, ZYGOSITY_HOM, ZYGOSITY_HEMI)
 
 

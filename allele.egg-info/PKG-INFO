@@ -8,123 +8,152 @@ Description-Content-Type: text/markdown
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 
-# allele
+# Allele
 
-Read a consumer DNA export and produce an annotated health and traits report.
-Entirely offline: your genome never leaves the machine.
+Read a consumer DNA export and see what the public databases actually say about
+it. Runs entirely offline. Your genome never leaves the machine.
 
-> **Status: early.** Input parsing is built and tested. The annotation engine
-> and the report renderer are next. See [Roadmap](#roadmap).
+**Web version: [baestheorem.github.io/allele](https://baestheorem.github.io/allele)** —
+runs in the browser tab, no upload, no server.
 
-Working name. Not published yet.
+```bash
+pip install -e .
+allele db update                       # one-time, downloads ClinVar + GWAS Catalog
+allele report ~/Downloads/genome.txt   # writes genome.report.html
+```
 
-## Supported inputs
+## Inputs
 
-Detected from file content, not from the extension, because vendors are
-careless about it. Plain, gzipped and zipped files all work.
+Detected from file content, not the extension, because vendors ship
+tab-delimited data in files named `.csv`. Plain, gzipped and zipped all work.
 
 | Input | Notes |
 |---|---|
-| 23andMe | 4 columns, concatenated genotype. Build from header. |
-| AncestryDNA | 5 columns, separate allele columns. Chromosomes 23/24/25/26 map to X/Y/X/MT. |
-| MyHeritage | Quoted CSV. |
-| Family Tree DNA | Quoted CSV, same shape as MyHeritage. |
-| Living DNA | Tab-delimited despite the `.csv` name. |
-| VCF | Single sample, or the first sample of a multi-sample file with a warning. |
-| Promethease report | Decodes the embedded genotype payload plus SNPedia's curation. |
+| 23andMe | 4 columns, concatenated genotype |
+| AncestryDNA | 5 columns, separate alleles; chromosomes 23/24/25/26 map to X/Y/X/MT |
+| MyHeritage | Quoted CSV |
+| Family Tree DNA | Quoted CSV, same shape |
+| Living DNA | Tab-delimited despite the `.csv` name |
+| VCF | Single sample, or the first of a multi-sample file with a warning |
+| Promethease report | Decodes the embedded payload plus SNPedia's curation |
 
-## Why the Promethease path exists
+## Sources
 
-Promethease is closed source, but the report it generates is self-contained
-HTML with the data separated from the code. Genotypes sit in base64'd,
-zlib-compressed JSON. Decoding that recovers the calls, SNPedia's curation of
-them, and, uniquely among these inputs, the strand each SNP was reported on.
+| Source | Records | License |
+|---|---|---|
+| [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) | 2,664,744 rsID-bearing SNVs | Public domain |
+| [GWAS Catalog](https://www.ebi.ac.uk/gwas/) | 847,508 associations, 341,074 variants | Free, attribution |
+| [SNPedia](https://www.snpedia.com) | 43,779 variants | CC BY-NC-SA, read from your own report |
 
-A report also embeds how SNPedia grades *every* genotype at the SNPs it covers,
-not only the one you carry: in a real report, 43,779 SNPs and 60,821 genotype
-gradings. So a report you already own can annotate a raw export from the same
-person.
+SNPedia is never downloaded or redistributed. The only route that respects its
+licence is a Promethease report already on your disk, which embeds the wiki's
+grading of every genotype at the variants it covers.
 
-That table is SNPedia content under CC BY-NC-SA. Reading it out of a file on
-your own disk is fine. Redistributing it is not, so it is extracted at runtime
-and never cached into this package.
+Where sources disagree, the disagreement is shown rather than resolved. ClinVar
+reclassifying something a year-old SNPedia grading calls harmless is the useful
+part, not a conflict to paper over.
 
-## The things that quietly go wrong
+## Every association cites its study
 
-These are the failure modes the code is built around, all of them silent if
-unhandled.
+A p-value with no provenance is unreadable: it gives you no way to tell a
+754-person study from 2007 apart from a 1.6-million-person meta-analysis from
+2025, and no way to go read either. So each trait association carries the paper
+behind it.
 
-**Strand.** SNPedia reports a large minority of SNPs on the minus strand. In a
-real report, 19,428 of 56,087 oriented SNPs, about one in three. Join on rsID
-without checking orientation and a third of genotypes read backwards. A/T and
-C/G heterozygotes are worse: both strands look valid, so they cannot be
-oriented by allele identity at all and are flagged rather than guessed.
+- **PubMed link** with first author, journal and year — 100% coverage
+- **Discovery cohort size** — 100% coverage
+- **Ancestry of that cohort** — 85% coverage
 
-**Ploidy.** 23andMe writes a Y or mitochondrial call as `G`. AncestryDNA's
-two-column layout writes the same call as `G G`. Y and MT are haploid, so the
-single allele is honest and the doubled form is a layout artifact. Without
-normalizing, one person's two files disagree at every Y and MT site. X is
-deliberately left alone, because collapsing it means inferring sex and being
-wrong about that is worse.
+Two flags come straight out of that. 60% of catalog associations were
+discovered in European-ancestry cohorts only, which is labelled, because effect
+sizes frequently do not transfer. Discovery cohorts under 5,000 are labelled
+too, because small studies overstate effects.
 
-**Build.** Positions are meaningless without knowing the assembly. When a
-header declares no build, this refuses to assume one and says so, rather than
-defaulting to 37 and being quietly wrong on a build 38 export.
+ClinVar findings carry their review status as a star rating, which is the
+single best signal for how much agreement sits behind a classification.
 
-**Indels.** 23andMe encodes insertions and deletions as `I` and `D`, which
-carry no sequence and can never be matched to a reference allele. They are
-marked unusable instead of being compared to something they cannot equal.
+## Why most of this code is about being wrong
 
-**No-calls.** `--`, `00`, `NN` and `.` all mean the chip produced nothing.
-Dropped, not treated as data.
+A consumer array reporting a rare pathogenic variant is usually wrong. That is
+the central problem, and on real data it dominated everything else: before these
+checks, the top of the ranked output was almost entirely genotyping artifacts,
+including variants SNPedia annotates in plain words as *"Ancestry miscall in all
+likelihood"* and *"99% of Ancestry users are told they have this genotype"*.
 
-## Usage
+Three checks demote them, each showing its arithmetic rather than asserting a
+verdict.
 
-```python
-from allele import parse
+**Hardy-Weinberg.** An allele at frequency *f* appears homozygous in about *f²*
+of people. When that expected rate falls far below the array's own error rate,
+an error is the better explanation.
 
-sample = parse("~/Downloads/genome.txt")
-print(sample.source_format, sample.build, len(sample))
-print(sample.stats())
-for warning in sample.warnings:
-    print("warning:", warning)
-```
+**Absent from every cohort.** A pathogenic variant with no frequency in 1000
+Genomes, ExAC or ESP is missing because it is rarer than those cohorts can
+resolve. That bounds *f* below roughly 1 in 100,000, so a homozygous or
+hemizygous call is almost certainly an artifact.
+
+**Common pathogenic.** A variant classified pathogenic yet carried by more than
+5% of people cannot cause a rare dominant condition. That is a reference-allele
+or annotation error.
+
+Demoted findings are still shown, under their own heading with the reasoning.
+Hiding them would be its own kind of dishonesty.
+
+## The other things that go quietly wrong
+
+**Strand.** SNPedia reports a large minority of variants on the minus strand:
+19,428 of 56,087 in one real report, about one in three. ClinVar and the GWAS
+Catalog are plus-strand, so the canonical model is plus-strand and conversions
+are explicit. In Promethease reports the field that drives the flip is
+`flipped`, not `orientation` — the two disagree on 2,314 variants in that same
+report. A/T and C/G heterozygotes read identically on both strands and are
+flagged rather than guessed.
+
+**Ploidy.** 23andMe writes a Y or mitochondrial call as `G`; AncestryDNA writes
+`G G`. Both are haploid, so the single allele is honest and the doubled form is
+a layout artifact. Without normalizing, one person's two exports disagree at
+every Y and MT site. X is left alone, because collapsing it means inferring sex.
+
+**Build.** A header with no declared assembly warns rather than defaulting to 37
+and being quietly wrong on a build 38 file.
+
+**Carriage.** A variant is only a finding if you carry the allele. A pathogenic
+variant you do not have is not a result.
+
+**Materiality.** SNPedia grades nearly every variant it knows, most of them 0
+for "boring". A floor requiring a ClinVar entry with assertion criteria,
+magnitude 2+, or a carried genome-wide significant association cuts 48,576 raw
+annotations to about 4,800.
+
+## Web version
+
+The browser build ships a subset so it can run with no server: ClinVar entries
+with at least one review star, and the strongest few associations per variant.
+About 5 MB gzipped. The command line version annotates against the full
+databases, so it reports strictly more, mostly unreviewed 0-star ClinVar
+entries.
+
+Both implementations follow the same pipeline and are checked against each
+other on real data.
 
 ## Development
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest
+.venv/bin/python scripts/build_web_bundle.py   # regenerate docs/db
 ```
 
-Vendor fixtures under `fixtures/` are synthetic. Real exports are personal data
-and are gitignored, along with generated reports and downloaded databases.
+Standard library only. Vendor fixtures are synthetic; real exports, generated
+reports and downloaded databases are all gitignored.
 
-Standard library only. No pandas: these files stream, and loading one into a
-dataframe on a laptop is a waste of memory.
+## Scope
 
-## Roadmap
-
-1. ~~Input parsing, normalization, vendor detection~~ done
-2. Annotation from local databases: ClinVar for clinical significance, GWAS
-   Catalog for trait associations. Downloaded once, indexed into SQLite.
-3. Report renderer: self-contained HTML, no network at view time.
-4. Confidence handling. A consumer chip calling a rare pathogenic variant is
-   more often a genotyping error than a real finding, which is why 23andMe
-   limits its own health reports and why Promethease shows a false-positive
-   warning on rare high-magnitude hits. Anything pathogenic has to be presented
-   with that caveat attached, never as a result.
-
-## Scope and limits
-
-Not a diagnostic. Consumer genotyping chips are not clinical sequencing: they
-test a fixed set of positions, miss most of the genome, and produce false
-positives on rare variants. Nothing here should be used to make a medical
-decision. Confirm anything that matters with a clinical-grade test and a
-genetic counselor.
+Not a diagnostic. Consumer arrays test a fixed set of positions, miss most of
+the genome, and produce false positives at rare sites. Nothing here should
+drive a medical decision. Confirm anything that matters with a clinical-grade
+test and a genetic counselor.
 
 ## License
 
-MIT for the code. Annotation databases keep their own licenses: ClinVar is
-public domain, the GWAS Catalog is free to use with attribution, and SNPedia
-content is CC BY-NC-SA and is never redistributed here.
+MIT for the code. Databases keep their own terms, listed above.

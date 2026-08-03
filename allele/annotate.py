@@ -9,7 +9,7 @@ statement, and a disagreement is surfaced as its own flag.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .model import Sample
 from .sources.base import (
@@ -89,6 +89,10 @@ class Finding:
                 best = max(best, weight * (0.4 + 0.15 * stars))
             elif annotation.source == "snpedia" and annotation.magnitude:
                 best = max(best, float(annotation.magnitude) * 8)
+            elif annotation.source == "cpic" and annotation.applies:
+                # Actionable now, so it outranks a risk estimate but not a
+                # well-reviewed pathogenic classification.
+                best = max(best, 45)
             elif annotation.source == "gwas" and annotation.applies:
                 best = max(best, 10)
         return best
@@ -138,6 +142,7 @@ class Report:
             "carried": len(self.carried),
             "clinical": len(self.by_category("clinical")),
             "traits": len(self.by_category("trait")),
+            "pharmacogenomic": len(self.by_category("pharmacogenomic")),
             "curated": len(self.by_category("curated")),
             "flagged": sum(1 for f in self.findings if f.flags),
             "credible": len(self.credible),
@@ -194,7 +199,52 @@ def is_material(finding: "Finding") -> bool:
         elif annotation.source == "gwas":
             # A genome-wide significant association you actually carry.
             return True
+        elif annotation.source == "cpic":
+            # CPIC only publishes guidance where evidence supports changing a
+            # prescription, so anything it returns is material by construction.
+            return True
     return False
+
+
+def _collapse_gene_level(findings: list[Finding]) -> list[Finding]:
+    """Keep one pharmacogenomic entry per gene.
+
+    CPIC guidance is about a gene, so every guideline variant on the array
+    repeats the identical statement. An array covering 33 CFTR positions would
+    otherwise produce 33 findings that all say the same thing. Keep the first,
+    note how many variants backed it, and drop findings left with nothing.
+    """
+    seen_genes: dict[str, Finding] = {}
+    counts: dict[str, int] = {}
+
+    for finding in findings:
+        for annotation in list(finding.annotations):
+            if annotation.source != "cpic":
+                continue
+            gene = annotation.genes[0] if annotation.genes else annotation.rsid
+            counts[gene] = counts.get(gene, 0) + 1
+            if gene in seen_genes:
+                finding.annotations.remove(annotation)
+            else:
+                seen_genes[gene] = finding
+
+    for gene, finding in seen_genes.items():
+        if counts[gene] > 1:
+            for index, annotation in enumerate(finding.annotations):
+                if annotation.source == "cpic" and (
+                    (annotation.genes[0] if annotation.genes else None) == gene
+                ):
+                    finding.annotations[index] = replace(
+                        annotation,
+                        flags=annotation.flags
+                        + (
+                            f"{counts[gene]} variants in {gene} on this array carry the "
+                            "same gene-level guidance; shown once",
+                        ),
+                    )
+                    break
+
+    return [f for f in findings if f.annotations]
 
 
 def annotate(
@@ -246,6 +296,8 @@ def annotate(
         if materiality and not is_material(finding):
             continue
         findings.append(finding)
+
+    findings = _collapse_gene_level(findings)
 
     # Artifacts sort to the bottom regardless of how severe they look.
     findings.sort(key=lambda f: (f.implausible, -f.score(), f.rsid))

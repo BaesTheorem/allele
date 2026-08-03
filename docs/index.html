@@ -49,6 +49,7 @@ padding:14px 16px;margin:0 0 10px}
 .card.clinical{border-left-color:var(--bad)}
 .card.trait{border-left-color:var(--accent)}
 .card.curated{border-left-color:var(--good)}
+.card.pharmacogenomic{border-left-color:var(--accent)}
 .card.demoted{border-left-color:var(--warn);background:var(--mid)}
 .head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px}
 .rsid a{color:var(--ink);font-weight:500;text-decoration:none;border-bottom:1px solid var(--line)}
@@ -129,15 +130,16 @@ function say(message, pct) {
 async function loadBundle() {
   if (bundle) return bundle;
   say('Loading annotation databases (about 5 MB)…', 5);
-  const [clinvar, gwas, man] = await Promise.all([
+  const [clinvar, gwas, cpic, man] = await Promise.all([
     fetch('db/clinvar.json').then(r => r.json()),
     fetch('db/gwas.json').then(r => r.json()),
+    fetch('db/cpic.json').then(r => r.json()).catch(() => null),
     fetch('db/manifest.json').then(r => r.json()).catch(() => null),
   ]);
   say('Indexing…', 25);
   await new Promise(r => setTimeout(r, 0));
   manifest = man;
-  bundle = new Allele.Bundle(clinvar, gwas);
+  bundle = new Allele.Bundle(clinvar, gwas, cpic);
   return bundle;
 }
 
@@ -182,7 +184,9 @@ async function handle(file) {
 
 function card(finding, demoted) {
   const cats = new Set(finding.annotations.map(a => a.category));
-  let kind = cats.has('clinical') ? 'clinical' : cats.has('curated') ? 'curated' : 'trait';
+  let kind = cats.has('clinical') ? 'clinical'
+    : cats.has('pharmacogenomic') ? 'pharmacogenomic'
+    : cats.has('curated') ? 'curated' : 'trait';
   if (demoted) kind += ' demoted';
 
   const chips = [];
@@ -235,7 +239,9 @@ function render(sample, result) {
   const credible = result.findings.filter(f => !f.implausible);
   const artifacts = result.findings.filter(f => f.implausible);
   const clinical = credible.filter(f => f.annotations.some(a => a.category === 'clinical'));
-  const others = credible.filter(f => !clinical.includes(f));
+  const pharma = credible.filter(f => !clinical.includes(f) &&
+    f.annotations.some(a => a.category === 'pharmacogenomic'));
+  const others = credible.filter(f => !clinical.includes(f) && !pharma.includes(f));
 
   const cells = [
     ['variants read', result.calls],
@@ -265,6 +271,7 @@ function render(sample, result) {
     <div class="grid">${cells}</div>
     ${warnings}
     ${section('Clinical significance', clinical, false)}
+    ${section('Medication guidance', pharma, false)}
     ${section('Traits and associations', others, false, 150)}
     ${artifacts.length ? `<h2>Demoted as likely artifacts <span style="color:var(--muted);font-weight:400;font-size:14px">${artifacts.length}</span></h2>
       <p style="color:var(--muted);font-size:13.5px">These matched a database but failed a population-genetics check,
