@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from genome_report import parse
-from genome_report.model import (
+from allele import parse
+from allele.model import (
     Call,
     complement,
     is_strand_ambiguous,
@@ -77,7 +77,7 @@ def test_strand_ambiguity():
 
 
 def test_normalize_ploidy_collapses_haploid_chromosomes():
-    from genome_report.model import normalize_ploidy
+    from allele.model import normalize_ploidy
 
     # Y and MT are haploid: AncestryDNA's doubled form must collapse.
     assert normalize_ploidy("Y", "GG") == "G"
@@ -206,7 +206,7 @@ def test_promethease_canonical_genotypes_are_plus_strand():
     ClinVar and the GWAS Catalog are plus-strand, so the canonical model must
     hold the plus-strand reading or a third of variants mismatch.
     """
-    from genome_report.model import complement
+    from allele.model import complement
 
     sample = parse(REPORT)
     calls = sample.by_rsid()
@@ -237,7 +237,7 @@ def test_promethease_preserves_strand():
 
 @needs_report
 def test_promethease_genotype_reference_table():
-    from genome_report.promethease import genotype_reference
+    from allele.promethease import genotype_reference
 
     table = genotype_reference(REPORT)
     assert len(table) > 1_000

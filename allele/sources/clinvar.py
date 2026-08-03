@@ -25,6 +25,8 @@ from .base import (
     SourceInfo,
     ZYGOSITY_UNKNOWN,
     plausibility,
+    plausibility_common_pathogenic,
+    plausibility_unknown_frequency,
     stars_for,
     zygosity_for,
 )
@@ -193,7 +195,15 @@ class ClinVar:
             if call.build and row["build"] and call.build != row["build"]:
                 flags.append(f"build mismatch: call is {call.build}, ClinVar row is {row['build']}")
 
-            implausible, explanation = plausibility(zygosity, row["frequency"])
+            implausible, explanation = plausibility_common_pathogenic(
+                row["frequency"], row["significance"]
+            )
+            if not implausible:
+                implausible, explanation = plausibility(zygosity, row["frequency"])
+            if not implausible and row["frequency"] is None:
+                implausible, explanation = plausibility_unknown_frequency(
+                    zygosity, row["significance"]
+                )
             if implausible and explanation:
                 flags.append(f"{FLAG_IMPLAUSIBLE}: {explanation}")
 

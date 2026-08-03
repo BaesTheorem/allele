@@ -109,6 +109,76 @@ CHIP_ERROR_RATE = 1e-3
 FLAG_IMPLAUSIBLE = "implausible"
 
 
+# Smallest allele frequency the cohorts behind ClinVar's AF fields could have
+# detected. ExAC alone is ~60,000 exomes, so ~120,000 alleles; a variant seen
+# once would sit near 8e-6. A pathogenic variant carrying no frequency at all
+# is therefore not "unknown rarity", it is "rarer than these cohorts can see".
+COHORT_DETECTION_LIMIT = 1e-5
+
+
+def plausibility_unknown_frequency(
+    zygosity: str, significance: str | None
+) -> tuple[bool, str | None]:
+    """Judge a pathogenic call that carries no population frequency at all.
+
+    ClinVar's AF fields come from 1000 Genomes, ExAC and ESP. A variant absent
+    from all three is absent because it is rarer than those cohorts can
+    resolve, not because nobody looked. Treating that as "frequency unknown, so
+    no opinion" is how a consumer array's homozygous miscalls end up presented
+    as pathogenic findings, which is the single most harmful failure mode here.
+    """
+    if not significance or "pathogenic" not in significance.lower():
+        return False, None
+    # Homozygous on an autosome, or hemizygous on a haploid chromosome (MT, Y),
+    # where a single copy is already full dosage and there is no carrier state.
+    if zygosity not in (ZYGOSITY_HOM, ZYGOSITY_HEMI):
+        return False, None
+
+    if zygosity == ZYGOSITY_HOM:
+        expected = COHORT_DETECTION_LIMIT ** 2
+        dosage = "homozygous"
+        rarity = f"homozygotes would be rarer than 1 in {int(1 / expected):,}"
+    else:
+        expected = COHORT_DETECTION_LIMIT
+        dosage = "hemizygous"
+        rarity = (
+            "on a haploid chromosome a single copy is full dosage, so this "
+            f"would occur in fewer than 1 in {int(1 / expected):,} people"
+        )
+
+    return True, (
+        f"{dosage} for a variant classified pathogenic that appears in no "
+        "population frequency cohort (1000 Genomes, ExAC, ESP). That places it "
+        f"below roughly 1 in {int(1 / COHORT_DETECTION_LIMIT):,} carriers, and "
+        f"{rarity}. On a consumer array a genotyping error is overwhelmingly "
+        "more likely. Treat as an artifact unless confirmed by clinical-grade "
+        "sequencing."
+    )
+
+
+# A dominant pathogenic variant cannot be carried by a large fraction of the
+# population; if it were, the condition would not be rare. Seeing one is the
+# signature of a reference-allele or annotation error rather than a finding.
+COMMON_VARIANT_CEILING = 0.05
+
+
+def plausibility_common_pathogenic(
+    frequency: float | None, significance: str | None
+) -> tuple[bool, str | None]:
+    """Catch "pathogenic" classifications on alleles most people carry."""
+    if frequency is None or not significance:
+        return False, None
+    if "pathogenic" not in significance.lower():
+        return False, None
+    if frequency <= COMMON_VARIANT_CEILING:
+        return False, None
+    return True, (
+        f"classified pathogenic yet carried by {frequency * 100:.1f}% of people. "
+        "A variant that common cannot cause a rare dominant condition, so this "
+        "is a reference-allele or annotation artifact rather than a finding."
+    )
+
+
 def plausibility(
     zygosity: str, frequency: float | None
 ) -> tuple[bool, str | None]:

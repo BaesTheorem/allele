@@ -164,10 +164,36 @@ def _detect_conflicts(annotations: list[Annotation]) -> list[str]:
     return conflicts
 
 
+# SNPedia grades nearly every SNP it knows, most of them 0 for "boring". Without
+# a floor, a report is tens of thousands of entries saying nothing, which buries
+# the handful that matter. These are the bars for appearing at all.
+MIN_MAGNITUDE = 2.0          # SNPedia's own convention: 2+ is "interesting"
+MIN_REVIEW_STARS = 1         # at least one submitter provided assertion criteria
+
+
+def is_material(finding: "Finding") -> bool:
+    """Is this worth a line in a report a human will actually read?"""
+    for annotation in finding.annotations:
+        if not annotation.applies:
+            continue
+        if annotation.source == "clinvar":
+            stars = annotation.review_stars
+            if stars is None or stars >= MIN_REVIEW_STARS:
+                return True
+        elif annotation.source == "snpedia":
+            if annotation.magnitude and annotation.magnitude >= MIN_MAGNITUDE:
+                return True
+        elif annotation.source == "gwas":
+            # A genome-wide significant association you actually carry.
+            return True
+    return False
+
+
 def annotate(
     sample: Sample,
     sources: list[AnnotationSource],
     include_uncarried: bool = False,
+    materiality: bool = True,
 ) -> Report:
     """Run every source over every usable call and merge the results.
 
@@ -207,8 +233,11 @@ def annotate(
             annotations=annotations,
             conflicts=_detect_conflicts(annotations),
         )
-        if finding.carried or include_uncarried:
-            findings.append(finding)
+        if not (finding.carried or include_uncarried):
+            continue
+        if materiality and not is_material(finding):
+            continue
+        findings.append(finding)
 
     # Artifacts sort to the bottom regardless of how severe they look.
     findings.sort(key=lambda f: (f.implausible, -f.score(), f.rsid))

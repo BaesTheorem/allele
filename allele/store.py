@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable, Iterator
 
-DEFAULT_DIR = Path.home() / ".local" / "share" / "genome-report"
+DEFAULT_DIR = Path.home() / ".local" / "share" / "allele"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS provenance (
