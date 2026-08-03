@@ -38,11 +38,27 @@ tab-delimited data in files named `.csv`. Plain, gzipped and zipped all work.
 | [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) | 2,664,744 rsID-bearing SNVs | Public domain |
 | [GWAS Catalog](https://www.ebi.ac.uk/gwas/) | 847,508 associations, 341,074 variants | Free, attribution |
 | [CPIC](https://cpicpgx.org) | 979 variants, 19 genes, levels A/B | Free |
+| [gnomAD](https://gnomad.broadinstitute.org) v4.1 exomes | frequency for notable positions | ODbL 1.0 |
+| [AlphaMissense](https://github.com/google-deepmind/alphamissense) | 226,998 predictions | CC BY-NC-SA, not redistributed |
 | [SNPedia](https://www.snpedia.com) | 43,779 variants | CC BY-NC-SA, read from your own report |
 
-SNPedia is never downloaded or redistributed. The only route that respects its
-licence is a Promethease report already on your disk, which embeds the wiki's
-grading of every genotype at the variants it covers.
+Two of these carry non-commercial, share-alike terms, so neither is ever
+redistributed here. AlphaMissense is downloaded by the user on request. SNPedia
+is read only from a Promethease report already on your disk, which embeds the
+wiki's grading of every genotype at the variants it covers.
+
+gnomAD and AlphaMissense are opt-in and GRCh38-only:
+
+```bash
+allele db update --only gnomad          # targeted range requests, ~1 hour
+allele db update --only alphamissense   # 0.6 GB download, indexes in a minute
+```
+
+gnomAD is an enricher rather than a source of findings. It supplies the
+population frequency the plausibility checks need; "this variant is common" is
+not a result on its own. AlphaMissense only speaks where ClinVar is silent,
+since a prediction adds nothing beside an expert-panel classification, and is
+always labelled a prediction rather than a finding.
 
 Where sources disagree, the disagreement is shown rather than resolved. ClinVar
 reclassifying something a year-old SNPedia grading calls harmless is the useful
@@ -82,10 +98,12 @@ verdict.
 of people. When that expected rate falls far below the array's own error rate,
 an error is the better explanation.
 
-**Absent from every cohort.** A pathogenic variant with no frequency in 1000
-Genomes, ExAC or ESP is missing because it is rarer than those cohorts can
+**Absent from every cohort.** A pathogenic variant with no frequency in gnomAD,
+1000 Genomes, ExAC or ESP is missing because it is rarer than those cohorts can
 resolve. That bounds *f* below roughly 1 in 100,000, so a homozygous or
-hemizygous call is almost certainly an artifact.
+hemizygous call is almost certainly an artifact. This is the fallback; where
+gnomAD has a measured frequency it is used instead, and the explanation says
+which source the number came from.
 
 **Common pathogenic.** A variant classified pathogenic yet carried by more than
 5% of people cannot cause a rare dominant condition. That is a reference-allele
@@ -128,13 +146,17 @@ annotations to about 4,800.
 ## Web version
 
 The browser build ships a subset so it can run with no server: ClinVar entries
-with at least one review star, and the strongest few associations per variant.
-About 5 MB gzipped. The command line version annotates against the full
-databases, so it reports strictly more, mostly unreviewed 0-star ClinVar
-entries.
+with at least one review star (both assemblies, with positions so it can verify
+build the same way the CLI does), the strongest few associations per variant,
+and all of CPIC. About 10 MB gzipped.
+
+It omits gnomAD and AlphaMissense. AlphaMissense cannot be redistributed at
+all, and gnomAD frequency for the full notable set would dominate the download.
+The command line version therefore reports strictly more.
 
 Both implementations follow the same pipeline and are checked against each
-other on real data.
+other on real data. Running them side by side is what caught a bug in the
+Python summary that the JavaScript had right.
 
 ## Development
 
