@@ -192,7 +192,37 @@ def test_promethease_report_parses():
     assert len(sample) > 10_000
     stats = sample.stats()
     assert stats["usable"] > 0
-    assert stats["no_call"] > 0
+    # Promethease drops uncalled positions, so a report has no no-calls but
+    # does carry the chip's raw I/D indel markers, which cannot be matched to
+    # a reference allele and so must not count as usable.
+    assert stats["indel"] > 0
+    assert stats["usable"] == stats["total"] - stats["indel"] - stats["no_call"]
+
+
+@needs_report
+def test_promethease_canonical_genotypes_are_plus_strand():
+    """`geno` is SNPedia-oriented; `was` is the plus-strand chip call.
+
+    ClinVar and the GWAS Catalog are plus-strand, so the canonical model must
+    hold the plus-strand reading or a third of variants mismatch.
+    """
+    from genome_report.model import complement
+
+    sample = parse(REPORT)
+    calls = sample.by_rsid()
+    checked = 0
+    for rsid, oriented in sample.alt_orientation_genotypes.items():
+        if not sample.flipped.get(rsid):
+            continue
+        plus = calls[rsid].genotype
+        if not plus or not oriented or is_strand_ambiguous(plus):
+            continue
+        # The two views must be complements of one another.
+        assert complement(plus) == oriented, (rsid, plus, oriented)
+        checked += 1
+        if checked > 500:
+            break
+    assert checked > 100
 
 
 @needs_report

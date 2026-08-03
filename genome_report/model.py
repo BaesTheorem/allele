@@ -152,9 +152,16 @@ class Sample:
     # Populated only by sources that know the strand per SNP (Promethease does;
     # raw chip exports do not, because they are all plus-strand by convention).
     orientation: dict[str, str] = field(default_factory=dict)
+    # Whether the curating source flipped this SNP relative to the chip
+    # reading. This, not `orientation`, is the field that drives the
+    # transform: the two disagree on thousands of SNPs.
+    flipped: dict[str, bool] = field(default_factory=dict)
     # Curation that arrived with the input, keyed by rsID. Only Promethease
     # reports carry this; raw exports are annotated from local databases later.
     annotations: dict[str, dict] = field(default_factory=dict)
+    # Genotypes as the curating source reported them, when that is not the plus
+    # strand. `calls` is always plus-strand; this is the SNPedia-oriented view.
+    alt_orientation_genotypes: dict[str, str] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.calls)

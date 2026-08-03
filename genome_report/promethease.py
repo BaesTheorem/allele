@@ -25,6 +25,7 @@ from pathlib import Path
 from .model import (
     Call,
     Sample,
+    complement,
     normalize_chromosome,
     normalize_genotype,
     normalize_ploidy,
@@ -139,6 +140,8 @@ def parse_report(path: str | Path) -> Sample:
 
     calls: list[Call] = []
     orientation: dict[str, str] = {}
+    snpedia_genotypes: dict[str, str] = {}
+    flipped: dict[str, bool] = {}
     annotations: dict[str, dict] = {}
     builds: set[int] = set()
     genosets = 0
@@ -156,18 +159,34 @@ def parse_report(path: str | Path) -> Sample:
             builds.add(build)
 
         chrom = normalize_chromosome(record.get("chrom"))
+
+        # `geno` is in SNPedia's orientation, which is the minus strand for
+        # about a third of SNPs. `was` is the original plus-strand chip call.
+        # Everything downstream (ClinVar, GWAS Catalog, other vendors' files)
+        # is plus-strand, so that is what the canonical model holds; the
+        # SNPedia-oriented reading is kept separately for SNPedia lookups.
+        plus = normalize_genotype(record.get("was"))
+        snpedia_oriented = normalize_genotype(record.get("geno"))
+        if not plus:
+            plus = snpedia_oriented
+            if record.get("flipped") and plus:
+                plus = complement(plus)
+
         calls.append(
             Call(
                 rsid=rsid,
                 chrom=chrom,
                 pos=record.get("pos") if isinstance(record.get("pos"), int) else None,
-                genotype=normalize_ploidy(chrom, normalize_genotype(record.get("geno"))),
+                genotype=normalize_ploidy(chrom, plus),
                 build=build if isinstance(build, int) else None,
             )
         )
+        if snpedia_oriented:
+            snpedia_genotypes[rsid] = normalize_ploidy(chrom, snpedia_oriented)
 
         if record.get("orientation"):
             orientation[rsid] = record["orientation"]
+        flipped[rsid] = bool(record.get("flipped"))
         annotation = annotation_from_record(record)
         if annotation:
             annotations[rsid] = annotation
@@ -192,5 +211,7 @@ def parse_report(path: str | Path) -> Sample:
         path=str(path),
         warnings=warnings,
         orientation=orientation,
+        flipped=flipped,
         annotations=annotations,
+        alt_orientation_genotypes=snpedia_genotypes,
     )
