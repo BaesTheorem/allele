@@ -388,17 +388,32 @@ function annotate(sample, bundle, onProgress) {
         });
       }
       for (const i of bundle.gwasIndex.get(rs) || []) {
-        const [, traitIdx, risk, geneIdx] = bundle.gwas.rows[i];
+        const [, traitIdx, risk, geneIdx, pmid, citeIdx, cohortN, ancIdx] = bundle.gwas.rows[i];
+        const ancestry = (ancIdx >= 0 && bundle.gwas.ancestries) ? bundle.gwas.ancestries[ancIdx] : '';
         // No reported risk allele means carriage cannot be established, so
         // the association says nothing about this person. Mirrors `applies`.
         if (!risk) continue;
         const zygosity = zygosityFor(call.g, risk);
         if (zygosity === ZYG.ABSENT || zygosity === ZYG.UNKNOWN) continue;
+        const flags = ['association only, not a diagnosis'];
+        if (ancestry === 'European') {
+          flags.push('discovered in a European-ancestry cohort only; effect sizes ' +
+            'often do not transfer to other populations');
+        }
+        if (cohortN && cohortN < 5000) {
+          flags.push(`small discovery cohort (${cohortN.toLocaleString()}); ` +
+            'small studies overstate effect sizes');
+        }
         annotations.push({
           source: 'gwas', category: 'trait',
           title: bundle.gwas.traits[traitIdx] || '',
           genes: geneIdx >= 0 ? [bundle.gwas.genes[geneIdx]] : [],
           conditions: [], zygosity, riskAllele: risk || null,
+          pubmed: pmid || null,
+          citation: (citeIdx >= 0 && bundle.gwas.citations) ? bundle.gwas.citations[citeIdx] : null,
+          cohortSize: cohortN || null,
+          ancestry: ancestry || null,
+          flag: flags.length > 1 ? flags.slice(1).join('; ') : null,
           note: 'association only, not a diagnosis',
         });
       }

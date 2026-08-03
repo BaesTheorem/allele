@@ -47,7 +47,16 @@ CREATE TABLE IF NOT EXISTS gwas (
     p_value     REAL,
     effect_size TEXT,
     genes       TEXT,
-    pubmed_id   TEXT
+    pubmed_id   TEXT,
+    first_author TEXT,
+    year        TEXT,
+    journal     TEXT,
+    study_title TEXT,
+    accession   TEXT,
+    cohort      TEXT,
+    cohort_size INTEGER,
+    ancestries  TEXT,
+    risk_freq   REAL
 );
 """
 

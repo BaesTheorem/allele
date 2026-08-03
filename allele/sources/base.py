@@ -56,7 +56,17 @@ class Annotation:
     risk_allele: str | None = None
     p_value: float | None = None
     effect_size: str | None = None
+    risk_frequency: float | None = None
+    # The study behind the association. Without this a p-value is a number with
+    # no provenance, and the reader cannot tell a 300-person candidate-gene
+    # study from a 700,000-person meta-analysis.
     pubmed_id: str | None = None
+    citation: str | None = None      # "Klarin D, Nat Genet 2018"
+    study_title: str | None = None
+    accession: str | None = None     # GWAS Catalog study accession
+    cohort: str | None = None        # verbatim discovery sample description
+    cohort_size: int | None = None
+    ancestries: tuple[str, ...] = ()
 
     # Curated (SNPedia, via a Promethease report)
     repute: str | None = None

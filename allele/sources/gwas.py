@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import sqlite3
 import urllib.request
 import zipfile
@@ -41,7 +42,53 @@ _COLUMNS = {
     "ci": "95% CI (TEXT)",
     "genes": "MAPPED_GENE",
     "pubmed": "PUBMEDID",
+    "author": "FIRST AUTHOR",
+    "date": "DATE",
+    "journal": "JOURNAL",
+    "study": "STUDY",
+    "cohort": "INITIAL SAMPLE SIZE",
+    "accession": "STUDY ACCESSION",
+    "risk_freq": "RISK ALLELE FREQUENCY",
 }
+
+# Ancestry labels the catalog uses in its sample descriptions. Which population
+# an association was discovered in decides whether it transfers to the reader at
+# all, and the great majority of the catalog is European-ancestry.
+ANCESTRY_TERMS = (
+    "European", "African American", "African", "East Asian", "South Asian",
+    "Asian", "Hispanic", "Latino", "Native American", "Middle Eastern",
+    "Oceanian", "Greater Middle Eastern", "Sub-Saharan African", "NR",
+)
+
+_SIZE_RE = re.compile(r"([0-9][0-9,]*)\s+(?:up to\s+)?[A-Za-z]")
+
+
+def parse_cohort(text: str) -> tuple[int | None, tuple[str, ...]]:
+    """Pull a headcount and the ancestry labels out of a sample description.
+
+    The catalog writes these as prose, e.g. "215,551 European ancestry
+    individuals, 57,332 African American individuals". Summing the numbers
+    gives the discovery cohort size; the labels say who it was discovered in.
+    """
+    if not text:
+        return None, ()
+    total = 0
+    for match in _SIZE_RE.finditer(text):
+        try:
+            total += int(match.group(1).replace(",", ""))
+        except ValueError:
+            pass
+    found = []
+    lowered = text.lower()
+    for term in ANCESTRY_TERMS:
+        if term.lower() in lowered and term not in found:
+            # "African" would otherwise also match "African American".
+            if term == "African" and "african american" in lowered and "sub-saharan" not in lowered:
+                continue
+            if term == "Asian" and ("east asian" in lowered or "south asian" in lowered):
+                continue
+            found.append(term)
+    return (total or None), tuple(found)
 
 
 def _risk_allele(strongest: str) -> str | None:
@@ -82,6 +129,14 @@ def _iter_records(path: Path) -> Iterator[tuple]:
                 if effect and ci:
                     effect = f"{effect} {ci}"
 
+                cohort_text = (row.get(_COLUMNS["cohort"]) or "").strip()
+                cohort_size, ancestries = parse_cohort(cohort_text)
+                year = (row.get(_COLUMNS["date"]) or "")[:4]
+                try:
+                    risk_freq = float(row.get(_COLUMNS["risk_freq"]) or "")
+                except ValueError:
+                    risk_freq = None
+
                 # A row can list several SNPs for one association.
                 for token in raw_snps.replace(";", ",").replace(" x ", ",").split(","):
                     rsid = token.strip()
@@ -96,6 +151,15 @@ def _iter_records(path: Path) -> Iterator[tuple]:
                         effect or None,
                         (row.get(_COLUMNS["genes"]) or "").strip(),
                         (row.get(_COLUMNS["pubmed"]) or "").strip(),
+                        (row.get(_COLUMNS["author"]) or "").strip(),
+                        year,
+                        (row.get(_COLUMNS["journal"]) or "").strip(),
+                        (row.get(_COLUMNS["study"]) or "").strip(),
+                        (row.get(_COLUMNS["accession"]) or "").strip(),
+                        cohort_text,
+                        cohort_size,
+                        "|".join(ancestries),
+                        risk_freq,
                     )
 
 
@@ -117,6 +181,8 @@ def build_index(conn: sqlite3.Connection, directory: Path, progress=None) -> int
     columns = [
         "rsid", "risk_allele", "trait", "mapped_trait",
         "p_value", "effect_size", "genes", "pubmed_id",
+        "first_author", "year", "journal", "study_title",
+        "accession", "cohort", "cohort_size", "ancestries", "risk_freq",
     ]
     count = replace_table(conn, "gwas", columns, _iter_records(path))
     record_provenance(conn, "gwas", "latest", URL, LICENSE, count)
@@ -164,6 +230,26 @@ class GwasCatalog:
             if not row["risk_allele"]:
                 flags.append("study reported no risk allele; carrier status unknown")
 
+            ancestries = tuple(a for a in (row["ancestries"] or "").split("|") if a)
+            if ancestries and ancestries == ("European",):
+                flags.append(
+                    "discovered in a European-ancestry cohort only; effect sizes "
+                    "often do not transfer to other populations"
+                )
+            if row["cohort_size"] and row["cohort_size"] < 5000:
+                flags.append(
+                    f"small discovery cohort ({row['cohort_size']:,}); "
+                    "small studies overstate effect sizes"
+                )
+
+            citation = None
+            if row["first_author"]:
+                citation = row["first_author"]
+                if row["journal"]:
+                    citation += f", {row['journal']}"
+                if row["year"]:
+                    citation += f" {row['year']}"
+
             out.append(
                 Annotation(
                     rsid=call.rsid,
@@ -179,7 +265,14 @@ class GwasCatalog:
                     risk_allele=row["risk_allele"],
                     p_value=row["p_value"],
                     effect_size=row["effect_size"],
+                    risk_frequency=row["risk_freq"],
                     pubmed_id=row["pubmed_id"],
+                    citation=citation,
+                    study_title=row["study_title"] or None,
+                    accession=row["accession"] or None,
+                    cohort=row["cohort"] or None,
+                    cohort_size=row["cohort_size"],
+                    ancestries=ancestries,
                     zygosity=zygosity,
                     genotype=call.genotype,
                     flags=tuple(flags),

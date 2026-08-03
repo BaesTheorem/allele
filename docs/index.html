@@ -60,6 +60,8 @@ background:var(--mid);border:1px solid var(--line);padding:1px 7px}
 .genes{color:var(--muted);font-size:12px;margin-left:auto}
 .stmt{margin:5px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:14px}
 .stmt .src{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.cite{font-size:12px;color:var(--muted);margin-top:2px}
+.cite a{color:var(--accent)}
 .flag{margin-top:8px;padding:8px 10px;background:var(--warn-c);color:var(--ink);
 font-size:12.5px;border-left:3px solid var(--warn)}
 button{font:inherit;background:var(--accent);color:var(--bg);border:0;padding:10px 18px;cursor:pointer}
@@ -205,7 +207,16 @@ function card(finding, demoted) {
     if (stmts.length >= 5) { hidden++; continue; }
     const cond = a.conditions && a.conditions.length && a.conditions[0]
       ? `<div class="src">${esc(a.conditions[0])}</div>` : '';
-    stmts.push(`<div class="stmt"><span class="src">${esc(a.source)}</span> ${esc(a.title)}${cond}</div>`);
+    // The paper behind the claim, so the reader can weigh it and go read it.
+    const bits = [];
+    if (a.pubmed) {
+      bits.push(`<a href="https://pubmed.ncbi.nlm.nih.gov/${esc(a.pubmed)}/" target="_blank" rel="noopener">${esc(a.citation || 'PubMed')}</a>`);
+    } else if (a.citation) { bits.push(esc(a.citation)); }
+    if (a.cohortSize) {
+      bits.push(`n=${a.cohortSize.toLocaleString()}${a.ancestry ? ' (' + esc(a.ancestry) + ')' : ''}`);
+    }
+    const cite = bits.length ? `<div class="cite">${bits.join(' · ')}</div>` : '';
+    stmts.push(`<div class="stmt"><span class="src">${esc(a.source)}</span> ${esc(a.title)}${cond}${cite}</div>`);
   }
   if (hidden) stmts.push(`<div class="stmt"><span class="src">+${hidden} further association${hidden !== 1 ? 's' : ''} not shown</span></div>`);
 

@@ -43,6 +43,25 @@ Where sources disagree, the disagreement is shown rather than resolved. ClinVar
 reclassifying something a year-old SNPedia grading calls harmless is the useful
 part, not a conflict to paper over.
 
+## Every association cites its study
+
+A p-value with no provenance is unreadable: it gives you no way to tell a
+754-person study from 2007 apart from a 1.6-million-person meta-analysis from
+2025, and no way to go read either. So each trait association carries the paper
+behind it.
+
+- **PubMed link** with first author, journal and year — 100% coverage
+- **Discovery cohort size** — 100% coverage
+- **Ancestry of that cohort** — 85% coverage
+
+Two flags come straight out of that. 60% of catalog associations were
+discovered in European-ancestry cohorts only, which is labelled, because effect
+sizes frequently do not transfer. Discovery cohorts under 5,000 are labelled
+too, because small studies overstate effects.
+
+ClinVar findings carry their review status as a star rating, which is the
+single best signal for how much agreement sits behind a classification.
+
 ## Why most of this code is about being wrong
 
 A consumer array reporting a rare pathogenic variant is usually wrong. That is

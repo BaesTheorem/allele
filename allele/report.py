@@ -62,6 +62,8 @@ background:var(--mid);border:1px solid var(--line);padding:1px 7px}
 .genes{color:var(--muted);font-size:12px;margin-left:auto}
 .stmt{margin:6px 0 0;padding-left:12px;border-left:2px solid var(--line)}
 .stmt .src{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.cite{font-size:12px;color:var(--muted);margin-top:2px}
+.cite a{color:var(--accent)}
 .flag{margin-top:8px;padding:8px 10px;background:var(--warn-c);color:var(--ink);
 font-size:12.5px;border-left:3px solid var(--warn)}
 .conflict{background:var(--accent-c);border-left-color:var(--accent)}
@@ -134,9 +136,35 @@ def _finding_card(finding: Finding, demoted: bool = False) -> str:
         if annotation.conditions:
             shown = ", ".join(annotation.conditions[:4])
             conditions = f'<div class="src">{_e(shown)}</div>'
+
+        # The paper behind the claim. A p-value with no provenance gives the
+        # reader no way to tell a small candidate-gene study from a large
+        # meta-analysis, and no way to go read the thing themselves.
+        cite = ""
+        if annotation.citation or annotation.pubmed_id:
+            bits = []
+            if annotation.pubmed_id:
+                bits.append(
+                    f'<a href="https://pubmed.ncbi.nlm.nih.gov/{_e(annotation.pubmed_id)}/"'
+                    f' target="_blank" rel="noopener">{_e(annotation.citation or "PubMed")}</a>'
+                )
+            elif annotation.citation:
+                bits.append(_e(annotation.citation))
+            if annotation.cohort_size:
+                who = ", ".join(annotation.ancestries) if annotation.ancestries else "participants"
+                bits.append(f"n={annotation.cohort_size:,} ({_e(who)})")
+            if annotation.risk_frequency is not None:
+                bits.append(f"risk allele in {annotation.risk_frequency * 100:.0f}% of that cohort")
+            if annotation.accession:
+                bits.append(
+                    f'<a href="https://www.ebi.ac.uk/gwas/studies/{_e(annotation.accession)}"'
+                    f' target="_blank" rel="noopener">{_e(annotation.accession)}</a>'
+                )
+            cite = f'<div class="cite">{" &middot; ".join(bits)}</div>'
+
         statements.append(
             f'<div class="stmt"><span class="src">{_e(annotation.source)}</span> '
-            f"{_e(annotation.title)}{extra}{conditions}</div>"
+            f"{_e(annotation.title)}{extra}{conditions}{cite}</div>"
         )
 
     if hidden:

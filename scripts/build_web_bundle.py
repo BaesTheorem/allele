@@ -107,11 +107,12 @@ def build_clinvar(conn) -> dict:
 
 
 def build_gwas(conn) -> dict:
-    traits, genes = Strings(), Strings()
+    traits, genes, citations, ancestries = Strings(), Strings(), Strings(), Strings()
     per_rsid: dict[int, list] = {}
 
     query = (
-        "SELECT rsid, risk_allele, trait, p_value, effect_size, genes "
+        "SELECT rsid, risk_allele, trait, p_value, effect_size, genes, "
+        "pubmed_id, first_author, year, journal, cohort_size, ancestries "
         "FROM gwas ORDER BY p_value"
     )
     for row in conn.execute(query):
@@ -124,19 +125,33 @@ def build_gwas(conn) -> dict:
         trait = (row["trait"] or "").strip()
         if not trait or any(entry[1] == traits.index.get(trait) for entry in bucket):
             continue
+        citation = ""
+        if row["first_author"]:
+            citation = row["first_author"]
+            if row["journal"]:
+                citation += f", {row['journal']}"
+            if row["year"]:
+                citation += f" {row['year']}"
+
         bucket.append([
             number,
             traits.add(trait),
             row["risk_allele"] or "",
             genes.add((row["genes"] or "").split(",")[0].strip()),
+            row["pubmed_id"] or "",
+            citations.add(citation),
+            row["cohort_size"] or 0,
+            ancestries.add((row["ancestries"] or "").replace("|", ", ")),
         ])
 
     rows = [entry for bucket in per_rsid.values() for entry in bucket]
     rows.sort(key=lambda r: r[0])
     return {
-        "columns": ["rs", "trait", "risk", "gene"],
+        "columns": ["rs", "trait", "risk", "gene", "pmid", "cite", "n", "ancestry"],
         "traits": traits.items,
         "genes": genes.items,
+        "citations": citations.items,
+        "ancestries": ancestries.items,
         "rows": rows,
     }
 
