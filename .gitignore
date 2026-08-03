@@ -6,6 +6,7 @@
 *.vcf.gz
 *.zip
 *.html
+!docs/index.html
 !fixtures/*.txt
 !fixtures/*.csv
 !fixtures/*.vcf
@@ -20,3 +21,6 @@ reports/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Web bundle is generated but committed so GitHub Pages can serve it.
+!docs/db/*.json

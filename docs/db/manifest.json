@@ -1,0 +1,16 @@
+{
+  "clinvar": {
+    "rows": 137306,
+    "min_review_stars": 1,
+    "license": "Public domain (NCBI ClinVar)",
+    "release": "GRCh37",
+    "downloaded": "2026-08-03"
+  },
+  "gwas": {
+    "rows": 484196,
+    "max_per_variant": 3,
+    "license": "NHGRI-EBI GWAS Catalog, free with attribution",
+    "release": "latest",
+    "downloaded": "2026-08-03"
+  }
+}

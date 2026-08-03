@@ -116,10 +116,18 @@ class Report:
     def artifacts(self) -> list[Finding]:
         return [f for f in self.findings if f.implausible]
 
-    def by_category(self, category: str) -> list[Finding]:
+    def by_category(self, category: str, credible_only: bool = True) -> list[Finding]:
+        """Findings carrying an applicable annotation of this category.
+
+        Counts only credible findings by default. A headline "clinical" number
+        that silently includes variants the plausibility check already demoted
+        as genotyping artifacts is the number most likely to alarm someone, and
+        it would contradict what the report itself displays.
+        """
+        pool = self.credible if credible_only else self.findings
         return [
-            f for f in self.findings
-            if any(a.category == category for a in f.annotations)
+            f for f in pool
+            if any(a.category == category and a.applies for a in f.annotations)
         ]
 
     def summary(self) -> dict[str, int]:
