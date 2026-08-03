@@ -188,6 +188,15 @@ async function inflate(bytes) {
   return new Response(stream).text();
 }
 
+// Promethease stores curation text HTML-escaped; decode once so the renderer
+// escapes exactly once rather than double-encoding.
+const _decoder = typeof document !== 'undefined' ? document.createElement('textarea') : null;
+function unescapeHtml(s) {
+  if (typeof s !== 'string' || !s.includes('&') || !_decoder) return s || '';
+  _decoder.innerHTML = s;
+  return _decoder.value;
+}
+
 async function parsePromethease(text, onProgress) {
   const re = /decompressString\('([A-Za-z0-9+/=]+)'\)/g;
   const calls = [];
@@ -232,7 +241,7 @@ async function parsePromethease(text, onProgress) {
         if (rec.orientation) orientation[rec.rsnum] = rec.orientation;
         flipped[rec.rsnum] = !!rec.flipped;
         curation[rec.rsnum] = {
-          summary: rec.genosummary || '', repute: rec.repute || null,
+          summary: unescapeHtml(rec.genosummary), repute: rec.repute || null,
           magnitude: typeof rec.magnitude === 'number' ? rec.magnitude : null,
           genes: rec.genes || [],
           clinvar: CLNSIG[rec.clinvar_1] || null,

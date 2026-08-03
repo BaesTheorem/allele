@@ -17,6 +17,7 @@ Nothing here talks to Promethease or SNPedia. It reads a file already on disk.
 from __future__ import annotations
 
 import base64
+import html as _html
 import json
 import re
 import zlib
@@ -63,9 +64,14 @@ def _decode_payloads(html: str) -> list[dict]:
 def annotation_from_record(record: dict) -> dict:
     """Pull SNPedia's curation of one SNP into a plain dict."""
     significance_code = record.get("clinvar_1")
+    # Promethease stores these HTML-escaped; decode once here so downstream
+    # renderers can escape exactly once instead of double-encoding.
+    def _text(value):
+        return _html.unescape(value) if isinstance(value, str) else value
+
     annotation = {
-        "summary": record.get("genosummary"),
-        "detail": record.get("genobody"),
+        "summary": _text(record.get("genosummary")),
+        "detail": _text(record.get("genobody")),
         "repute": record.get("repute"),
         "magnitude": record.get("magnitude"),
         "genes": record.get("genes") or [],
