@@ -1,0 +1,22 @@
+# Genome data must never enter this repo. Fixtures are synthetic; real exports
+# and reports are personal data and stay on the user's disk.
+*.txt
+*.csv
+*.vcf
+*.vcf.gz
+*.zip
+*.html
+!fixtures/*.txt
+!fixtures/*.csv
+!fixtures/*.vcf
+
+# Downloaded reference databases (ClinVar, GWAS Catalog) and generated reports
+data/
+reports/
+*.sqlite
+*.db
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
