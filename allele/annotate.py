@@ -24,6 +24,11 @@ from .sources.base import (
 # a statistical association.
 SEVERITY = {
     "pathogenic": 100,
+    # ClinVar's own combined classification, used where submitters split between
+    # the two. It is the third most common pathogenic-family value in the
+    # release (53,062 records), so leaving it out sent real clinical findings to
+    # the unrecognized default and ranked them below "risk factor".
+    "pathogenic/likely pathogenic": 95,
     "likely pathogenic": 90,
     "drug response": 60,
     "risk factor": 55,

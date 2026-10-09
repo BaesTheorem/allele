@@ -301,10 +301,24 @@ function zygosityFor(genotype, allele) {
   return count === 2 ? ZYG.HOM : ZYG.HET;
 }
 
+// ClinVar classifications that are *expected* to be common, so frequency
+// carries no argument against them. HFE C282Y ("Pathogenic, low penetrance |
+// risk factor", ~6% in Europeans) is the diagnostic genotype for hereditary
+// haemochromatosis; calling it an annotation artifact buries a treatable
+// finding. Kept in step with COMMON_BY_DESIGN in allele/sources/base.py.
+const COMMON_BY_DESIGN = ['low penetrance', 'low_penetrance', 'risk factor', 'risk_factor',
+  'risk allele', 'risk_allele', 'association', 'drug response', 'drug_response', 'protective'];
+
+function expectsCommonCarriers(significance) {
+  const s = (significance || '').toLowerCase();
+  return COMMON_BY_DESIGN.some(marker => s.includes(marker));
+}
+
 function plausibility(zygosity, frequency, significance) {
   const path = significance && significance.toLowerCase().includes('pathogenic');
 
-  if (frequency != null && frequency >= 0 && path && frequency > COMMON_CEILING) {
+  if (frequency != null && frequency >= 0 && path && frequency > COMMON_CEILING
+      && !expectsCommonCarriers(significance)) {
     return `classified pathogenic yet carried by ${(frequency * 100).toFixed(1)}% of people. ` +
       'A variant that common cannot cause a rare dominant condition, so this is a ' +
       'reference-allele or annotation artifact rather than a finding.';
@@ -546,7 +560,10 @@ function annotate(sample, bundle, onProgress) {
     });
   }
 
-  findings.sort((a, b) => (a.implausible - b.implausible) || (b.score - a.score));
+  // rsID breaks ties so equal-scoring findings come out in a stable order, and
+  // in the same order the CLI produces.
+  findings.sort((a, b) => (a.implausible - b.implausible) || (b.score - a.score)
+    || (a.rsid < b.rsid ? -1 : a.rsid > b.rsid ? 1 : 0));
   return { findings, considered, calls: sample.calls.length };
 }
 
@@ -562,6 +579,11 @@ function scoreOf(annotations) {
       best = Math.max(best, w * (0.4 + 0.15 * stars));
     } else if (a.source === 'snpedia' && a.magnitude) {
       best = Math.max(best, a.magnitude * 8);
+    } else if (a.source === 'cpic') {
+      // Actionable now, so it outranks a risk estimate but not a well-reviewed
+      // pathogenic classification. Omitting this sank every pharmacogenomic
+      // finding to the bottom of the browser's list but not the CLI's.
+      best = Math.max(best, 45);
     } else if (a.source === 'gwas') {
       best = Math.max(best, 10);
     }

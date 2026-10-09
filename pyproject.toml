@@ -12,6 +12,9 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.optional-dependencies]
+# gnomAD is the one feature that needs a third-party package: htslib range
+# requests against the remote VCF. Everything else is standard library.
+gnomad = ["pysam>=0.22"]
 dev = ["pytest>=8"]
 
 [project.scripts]

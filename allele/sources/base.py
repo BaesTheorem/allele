@@ -48,6 +48,12 @@ class Annotation:
     conditions: tuple[str, ...] = ()
     genes: tuple[str, ...] = ()
 
+    # The reference and alternate alleles the statement is about, where the
+    # source knows them. Needed to emit a valid VCF: REF and ALT are required
+    # fields there, and "." is not a legal value for REF.
+    ref: str | None = None
+    alt: str | None = None
+
     # Clinical (ClinVar)
     significance: str | None = None
     review_stars: int | None = None
@@ -149,22 +155,25 @@ def plausibility_unknown_frequency(
     if zygosity not in (ZYGOSITY_HOM, ZYGOSITY_HEMI):
         return False, None
 
+    # Round rather than truncate: 1 / 1e-5 is 99999.999... in binary floating
+    # point, and a tool whose argument is "here is the arithmetic" should not
+    # show its reader "1 in 99,999" when it means 1 in 100,000.
     if zygosity == ZYGOSITY_HOM:
         expected = COHORT_DETECTION_LIMIT ** 2
         dosage = "homozygous"
-        rarity = f"homozygotes would be rarer than 1 in {int(1 / expected):,}"
+        rarity = f"homozygotes would be rarer than 1 in {round(1 / expected):,}"
     else:
         expected = COHORT_DETECTION_LIMIT
         dosage = "hemizygous"
         rarity = (
             "on a haploid chromosome a single copy is full dosage, so this "
-            f"would occur in fewer than 1 in {int(1 / expected):,} people"
+            f"would occur in fewer than 1 in {round(1 / expected):,} people"
         )
 
     return True, (
         f"{dosage} for a variant classified pathogenic that appears in no "
         "population frequency cohort (1000 Genomes, ExAC, ESP). That places it "
-        f"below roughly 1 in {int(1 / COHORT_DETECTION_LIMIT):,} carriers, and "
+        f"below roughly 1 in {round(1 / COHORT_DETECTION_LIMIT):,} carriers, and "
         f"{rarity}. On a consumer array a genotyping error is overwhelmingly "
         "more likely. Treat as an artifact unless confirmed by clinical-grade "
         "sequencing."
@@ -175,6 +184,33 @@ def plausibility_unknown_frequency(
 # population; if it were, the condition would not be rare. Seeing one is the
 # signature of a reference-allele or annotation error rather than a finding.
 COMMON_VARIANT_CEILING = 0.05
+
+# ...unless ClinVar has already said the variant behaves that way on purpose.
+# A low-penetrance allele, a risk factor and a drug-response marker are all
+# *expected* to be common, so frequency carries no argument against them. HFE
+# C282Y is the case that matters: ClinVar classifies it
+# "Pathogenic/Pathogenic,_low_penetrance|risk_factor", gnomAD puts it near 6%,
+# and it is the diagnostic genotype for hereditary haemochromatosis in roughly
+# 1 in 200 Northern Europeans. Calling that an annotation artifact buries a
+# real, treatable finding.
+COMMON_BY_DESIGN = (
+    "low penetrance",
+    "low_penetrance",
+    "risk factor",
+    "risk_factor",
+    "risk allele",
+    "risk_allele",
+    "association",
+    "drug response",
+    "drug_response",
+    "protective",
+)
+
+
+def expects_common_carriers(significance: str | None) -> bool:
+    """True when ClinVar's own wording predicts the allele will be common."""
+    value = (significance or "").lower()
+    return any(marker in value for marker in COMMON_BY_DESIGN)
 
 
 def plausibility_common_pathogenic(
@@ -187,10 +223,14 @@ def plausibility_common_pathogenic(
         return False, None
     if frequency <= COMMON_VARIANT_CEILING:
         return False, None
+    if expects_common_carriers(significance):
+        return False, None
     return True, (
         f"classified pathogenic yet carried by {frequency * 100:.1f}% of people. "
-        "A variant that common cannot cause a rare dominant condition, so this "
-        "is a reference-allele or annotation artifact rather than a finding."
+        "A variant that common cannot cause a rare dominant condition. That "
+        "leaves a reference-allele or annotation error as the likeliest reading, "
+        "though a recessive condition is the other way this happens: check the "
+        "inheritance mode in ClinVar before dismissing it."
     )
 
 
@@ -221,7 +261,7 @@ def plausibility(
     if expected >= CHIP_ERROR_RATE:
         return False, None
 
-    one_in = int(1 / expected) if expected > 0 else 0
+    one_in = round(1 / expected) if expected > 0 else 0
     ratio = CHIP_ERROR_RATE / expected if expected else float("inf")
     return True, (
         f"{zygosity} for an allele found in {frequency * 100:.3g}% of people, "

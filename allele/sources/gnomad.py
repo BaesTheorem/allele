@@ -197,17 +197,34 @@ class Gnomad:
             notes=["GRCh38 only", "exomes; covers coding regions"],
         )
 
-    def frequency(self, chrom: str | None, pos: int | None, alt: str) -> float | None:
-        """Population frequency for one alternate allele, if gnomAD has it."""
+    def frequency(
+        self, chrom: str | None, pos: int | None, alt: str, build: int | None = None
+    ) -> float | None:
+        """Population frequency for one alternate allele, if gnomAD has it.
+
+        `build` is required in practice even though it defaults to None. This
+        table is GRCh38 only, and a position is meaningless without the assembly
+        it was measured on: a GRCh37 coordinate lands on an unrelated GRCh38
+        variant often enough to matter, and the wrong frequency then drives
+        every plausibility check while being displayed as the reasoning.
+        Refusing to answer is the honest response.
+        """
         if not chrom or not pos:
             return None
+        if build is not None and build != BUILD:
+            return None
         row = self.conn.execute(
-            "SELECT af, af_grpmax FROM gnomad WHERE chrom=? AND pos=? AND alt=? LIMIT 1",
-            (chrom, pos, alt),
+            "SELECT af, af_grpmax FROM gnomad WHERE chrom=? AND pos=? AND alt=? AND build=? LIMIT 1",
+            (chrom, pos, alt, BUILD),
         ).fetchone()
         if not row:
             return None
-        return row["af"] if row["af"] is not None else row["af_grpmax"]
+        # Prefer the highest frequency across ancestry groups. The plausibility
+        # checks ask whether *this* person could carry the genotype, and their
+        # ancestry is unknown, so the global average is the wrong denominator:
+        # it makes an allele common in one population look rare in everyone.
+        candidates = [v for v in (row["af"], row["af_grpmax"]) if v is not None]
+        return max(candidates) if candidates else None
 
     def lookup(self, call: Call) -> list[Annotation]:
         return []

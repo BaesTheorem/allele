@@ -50,9 +50,16 @@ wiki's grading of every genotype at the variants it covers.
 gnomAD and AlphaMissense are opt-in and GRCh38-only:
 
 ```bash
+pip install -e ".[gnomad]"              # gnomAD needs pysam; nothing else does
 allele db update --only gnomad          # targeted range requests, ~1 hour
 allele db update --only alphamissense   # 0.6 GB download, indexes in a minute
 ```
+
+Both are keyed by GRCh38 coordinate and neither will answer for a GRCh37 file.
+A position means nothing without the assembly it was measured on, and a GRCh37
+coordinate lands on an unrelated GRCh38 variant often enough to matter, so both
+sources stay silent rather than attach a frequency or a prediction belonging to
+something you do not have.
 
 gnomAD is an enricher rather than a source of findings. It supplies the
 population frequency the plausibility checks need; "this variant is common" is
@@ -106,11 +113,38 @@ gnomAD has a measured frequency it is used instead, and the explanation says
 which source the number came from.
 
 **Common pathogenic.** A variant classified pathogenic yet carried by more than
-5% of people cannot cause a rare dominant condition. That is a reference-allele
-or annotation error.
+5% of people cannot cause a rare dominant condition. That is usually a
+reference-allele or annotation error.
 
 Demoted findings are still shown, under their own heading with the reasoning.
 Hiding them would be its own kind of dishonesty.
+
+### Where these rules were wrong about you
+
+Each check is an argument about a *rare, highly penetrant, dominant* condition,
+and each one had to learn where that premise fails.
+
+Frequency is the load-bearing number, and there is no such thing as one
+frequency. HFE C282Y sits near 1% globally and near 6% in Northern Europeans,
+where it is the diagnostic genotype for hereditary haemochromatosis in roughly 1
+in 200 people. Judged against the global average, a true homozygote failed
+Hardy-Weinberg and was filed as a genotyping error. So the frequency used is the
+highest across gnomAD's ancestry groups, not the average: the question is
+whether *this reader* could carry the genotype, and their ancestry is unknown.
+
+Being common is also not always evidence against a classification. ClinVar marks
+some variants low penetrance, a risk factor or a drug-response marker, and those
+are *expected* to be common. C282Y is classified
+`Pathogenic/Pathogenic, low penetrance|risk factor`, so the common-pathogenic
+rule now stands down where ClinVar's own wording predicts a common allele, and
+the explanation names recessive inheritance as the other reading rather than
+asserting an artifact.
+
+A measured frequency of exactly zero used to mean "no opinion", because the
+cohort-absence fallback tested for a missing value rather than a falsy one.
+Indexing gnomAD therefore switched the check off for thousands of the variants
+it was written for, which made the tool safer when its enrichment source was
+broken than when it worked.
 
 ## The other things that go quietly wrong
 
@@ -152,11 +186,24 @@ and all of CPIC. About 10 MB gzipped.
 
 It omits gnomAD and AlphaMissense. AlphaMissense cannot be redistributed at
 all, and gnomAD frequency for the full notable set would dominate the download.
-The command line version therefore reports strictly more.
+The command line version therefore reports more, though not strictly more per
+finding: without gnomAD the browser falls back to ClinVar's sparser frequency
+fields, so the two can reach different verdicts on the same variant.
 
-Both implementations follow the same pipeline and are checked against each
-other on real data. Running them side by side is what caught a bug in the
-Python summary that the JavaScript had right.
+Both implementations follow the same pipeline, and `tests/test_parity.py`
+enforces it rather than asserting it. Identical inputs go through both engines
+and the verdicts are compared: the plausibility rules across every combination
+of zygosity, frequency and classification, plus scoring, zygosity, genotype and
+chromosome normalization, ploidy collapsing and strand ambiguity. The
+comparison is rule-level, because the CLI annotates against the full database
+and the browser against a shipped subset, so different *findings* are expected
+and different *rules* are not.
+
+That test was written after the claim turned out to be false. It found
+pharmacogenomic findings scoring 45 in the CLI and 0 in the browser, and a
+combined `Pathogenic/Likely pathogenic` classification that the JavaScript
+ranked correctly and the Python sent to the unrecognized default. It skips when
+Node is unavailable.
 
 ## Development
 
@@ -166,8 +213,14 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python scripts/build_web_bundle.py   # regenerate docs/db
 ```
 
-Standard library only. Vendor fixtures are synthetic; real exports, generated
-reports and downloaded databases are all gitignored.
+Standard library only, with one exception: gnomAD reads a remote VCF over
+htslib range requests, so `allele db update --only gnomad` needs
+`pip install -e ".[gnomad]"`. Nothing else imports it, and every other command
+works without it.
+
+The parity tests additionally need Node, and skip without it. Vendor fixtures
+are synthetic; real exports, generated reports and downloaded databases are all
+gitignored.
 
 ## Scope
 
@@ -175,6 +228,30 @@ Not a diagnostic. Consumer arrays test a fixed set of positions, miss most of
 the genome, and produce false positives at rare sites. Nothing here should
 drive a medical decision. Confirm anything that matters with a clinical-grade
 test and a genetic counselor.
+
+### The limits are structural, not a backlog
+
+An array genotypes a panel of positions somebody chose in advance, roughly
+600,000 to 1,000,000 of them. It cannot see anything else, so a whole class of
+questions is not answered slowly here, it is unanswerable from this input. No
+version of this tool will call a novel variant, a copy-number change or a repeat
+expansion, because there are no sequencing reads to call them from. It will not
+report a pharmacogenomic star-allele diplotype either, which needs full gene
+coverage and phase, and is why the CPIC findings say a guideline exists for the
+gene rather than claiming your genotype changes a dose.
+
+Even the annotation ceiling is lower than the database sizes suggest. ClinVar
+has 155,914 notable variants among the single-base substitutions a chip could
+match at all; a consumer array overlaps a few thousand of them. Indels are out
+by construction: 23andMe writes them as `I` and `D`, which carry no sequence, so
+they can never be checked against a reference allele.
+
+Reading "0 clinical findings" as "nothing to worry about" is therefore the
+wrong inference. It means nothing was found among the small, pre-selected set of
+positions this file happens to contain.
+
+[ROADMAP.md](ROADMAP.md) covers what is worth building given that ceiling, and
+what is permanently outside it.
 
 ## License
 

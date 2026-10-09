@@ -17,6 +17,12 @@ reports/
 *.sqlite
 *.db
 
+# htslib writes the tabix index for a remote VCF into the working directory, so
+# a gnomAD update run from a checkout leaves these behind.
+*.tbi
+*.bgz
+*.bai
+
 .venv/
 __pycache__/
 *.pyc
@@ -24,3 +30,8 @@ __pycache__/
 
 # Web bundle is generated but committed so GitHub Pages can serve it.
 !docs/db/*.json
+
+# Build artifacts
+*.egg-info/
+build/
+dist/

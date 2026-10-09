@@ -12,6 +12,7 @@ from dataclasses import asdict
 from datetime import date
 
 from .annotate import Finding, Report
+from .model import CHROMOSOMES
 
 
 def to_dict(report: Report) -> dict:
@@ -54,13 +55,78 @@ def to_json(report: Report, indent: int | None = 2) -> str:
     return json.dumps(to_dict(report), indent=indent, default=str)
 
 
+def _alleles_for(finding: Finding) -> tuple[str, str] | None:
+    """The REF and ALT this finding is about, if any source knows them.
+
+    ClinVar is preferred over a prediction, since its ALT is the allele the
+    classification is actually about.
+    """
+    ordered = sorted(
+        (a for a in finding.annotations if a.ref and a.alt),
+        key=lambda a: 0 if a.source == "clinvar" else 1,
+    )
+    for annotation in ordered:
+        ref, alt = annotation.ref.upper(), annotation.alt.upper()
+        if ref in _BASES and alt in _BASES:
+            return ref, alt
+    return None
+
+
+_BASES = frozenset("ACGTN")
+
+
+def _genotype_field(genotype: str, ref: str, alt: str) -> str:
+    """The array's call as VCF allele indices.
+
+    GT is a reserved, index-valued field: 0 is REF, 1 is the first ALT. Writing
+    bases there (`A/G`) parses as a malformed genotype in every VCF reader.
+    """
+    if not genotype:
+        return "./."
+    indices = []
+    for base in genotype:
+        if base == ref:
+            indices.append("0")
+        elif base == alt:
+            indices.append("1")
+        else:
+            indices.append(".")
+    # Unphased genotypes are conventionally written low index first, so a
+    # heterozygote reads 0/1 rather than 1/0.
+    indices.sort(key=lambda i: (i == ".", i))
+    return "/".join(indices)
+
+
+def _contig_order(chrom: str) -> int:
+    """Sort key putting chromosomes in reference order, not lexical order."""
+    try:
+        return CHROMOSOMES.index(chrom)
+    except ValueError:
+        return len(CHROMOSOMES)
+
+
 def to_vcf(report: Report) -> str:
     """Findings as an annotated VCF, for feeding downstream tools.
 
-    Only findings with a position and a known build are emitted: a VCF row
-    without trustworthy coordinates is worse than no row.
+    Only findings with a position and a known REF/ALT are emitted: a VCF row
+    without trustworthy coordinates or alleles is worse than no row, because
+    downstream tools cannot tell it apart from a real one.
     """
     sample = report.sample
+    rows = []
+    for finding in report.findings:
+        if not finding.chrom or not finding.pos:
+            continue
+        alleles = _alleles_for(finding)
+        if alleles is None:
+            continue
+        rows.append((finding, *alleles))
+
+    # VCF must be coordinate-sorted within each contig to be indexable. The
+    # report itself is ordered by severity, which is the right order for a human
+    # and the wrong one for a file another tool will read.
+    rows.sort(key=lambda item: (_contig_order(item[0].chrom), item[0].pos))
+
     lines = [
         "##fileformat=VCFv4.2",
         f"##fileDate={date.today().strftime('%Y%m%d')}",
@@ -73,7 +139,16 @@ def to_vcf(report: Report) -> str:
             f"##allele_source=<name={info.name},release={info.release or 'NA'},"
             f"records={info.record_count},license=\"{info.license}\">"
         )
+    # Every contig used has to be declared before the header line.
+    for chrom in sorted({f.chrom for f, _, _ in rows}, key=_contig_order):
+        lines.append(f"##contig=<ID={chrom}>")
+    if not rows:
+        lines.append(
+            '##allele_note=<msg="no findings carried usable coordinates and alleles; '
+            'the input may not declare a genome build">'
+        )
     lines += [
+        '##FILTER=<ID=DEMOTED,Description="Failed a plausibility check; likely a genotyping artifact">',
         '##INFO=<ID=AL_SRC,Number=.,Type=String,Description="Sources reporting this variant">',
         '##INFO=<ID=AL_SIG,Number=.,Type=String,Description="Clinical significance">',
         '##INFO=<ID=AL_STARS,Number=1,Type=Integer,Description="ClinVar review stars">',
@@ -85,14 +160,18 @@ def to_vcf(report: Report) -> str:
     ]
 
     def escape(value: str) -> str:
+        """Make a free-text value safe as one INFO value.
+
+        Commas separate values within a field and semicolons separate fields,
+        so both have to go, along with the `=` that splits key from value.
+        """
         return (
-            str(value).replace(" ", "_").replace(";", ",").replace("=", "-").replace("\t", "_")
+            str(value)
+            .replace(" ", "_").replace(";", "|").replace(",", "|")
+            .replace("=", "-").replace("\t", "_")
         )
 
-    emitted = 0
-    for finding in report.findings:
-        if not finding.chrom or not finding.pos:
-            continue
+    for finding, ref, alt in rows:
         demoted = finding.implausible
         info: list[str] = [f"AL_SRC={','.join(sorted(finding.sources))}"]
 
@@ -120,17 +199,11 @@ def to_vcf(report: Report) -> str:
         lines.append(
             "\t".join([
                 finding.chrom, str(finding.pos), finding.rsid or ".",
-                ".", ".", ".", "DEMOTED" if demoted else "PASS",
-                ";".join(info), "GT", "/".join(finding.genotype) or "./.",
+                ref, alt, ".", "DEMOTED" if demoted else "PASS",
+                ";".join(info), "GT", _genotype_field(finding.genotype, ref, alt),
             ])
         )
-        emitted += 1
 
-    if not emitted:
-        lines.append(
-            "##allele_note=<msg=\"no findings carried usable coordinates; "
-            "the input may not declare a genome build\">"
-        )
     return "\n".join(lines) + "\n"
 
 

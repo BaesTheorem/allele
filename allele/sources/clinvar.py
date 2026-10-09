@@ -84,14 +84,21 @@ def _iter_records(path: Path, build: int) -> Iterator[tuple]:
             if not rs:
                 continue
 
-            frequency = None
+            # Take the largest of the three cohorts rather than the first
+            # present one. These fields disagree because they measure different
+            # populations, and the rarity argument downstream is an upper bound
+            # on how often the genotype can occur: the smallest estimate makes a
+            # real finding look impossible. AF_TGP is 1000 Genomes at 2,504
+            # samples, ~25x less resolution than ExAC, and it was being
+            # preferred purely for coming first in the tuple.
+            frequencies = []
             for key in ("AF_TGP", "AF_EXAC", "AF_ESP"):
                 if info.get(key):
                     try:
-                        frequency = float(info[key])
-                        break
+                        frequencies.append(float(info[key]))
                     except ValueError:
                         pass
+            frequency = max(frequencies) if frequencies else None
 
             genes = ""
             if info.get("GENEINFO"):
@@ -221,7 +228,11 @@ class ClinVar:
             frequency = row["frequency"]
             frequency_source = "ClinVar AF"
             if self.frequencies is not None:
-                measured = self.frequencies.frequency(row["chrom"], row["pos"], row["alt"])
+                # Pass the build of the ClinVar row the position came from, not
+                # the call's: these are that row's coordinates.
+                measured = self.frequencies.frequency(
+                    row["chrom"], row["pos"], row["alt"], row["build"]
+                )
                 if measured is not None:
                     frequency = measured
                     frequency_source = "gnomAD"
@@ -238,7 +249,12 @@ class ClinVar:
             )
             if not implausible:
                 implausible, explanation = plausibility(zygosity, frequency)
-            if not implausible and frequency is None:
+            # A measured frequency of exactly 0.0 is stronger evidence of
+            # rarity than no frequency at all, so it must reach this rule too.
+            # Gating on `is None` meant indexing gnomAD turned the check off for
+            # the very variants it was written for: gnomAD stores 0.0 for
+            # thousands of positions it looked at and never saw the allele.
+            if not implausible and not frequency:
                 implausible, explanation = plausibility_unknown_frequency(
                     zygosity, row["significance"]
                 )
@@ -261,6 +277,8 @@ class ClinVar:
                     title=_clean(row["significance"]),
                     conditions=conditions,
                     genes=genes,
+                    ref=row["ref"],
+                    alt=row["alt"],
                     significance=_clean(row["significance"]),
                     review_stars=stars,
                     zygosity=zygosity,

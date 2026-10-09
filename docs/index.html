@@ -129,7 +129,7 @@ function say(message, pct) {
 
 async function loadBundle() {
   if (bundle) return bundle;
-  say('Loading annotation databases (about 5 MB)…', 5);
+  say('Loading annotation databases (about 10 MB)…', 5);
   const [clinvar, gwas, cpic, man] = await Promise.all([
     fetch('db/clinvar.json').then(r => r.json()),
     fetch('db/gwas.json').then(r => r.json()),

@@ -10,6 +10,7 @@ transfer poorly elsewhere. The report has to say so.
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import re
 import sqlite3
@@ -63,6 +64,20 @@ ANCESTRY_TERMS = (
 _SIZE_RE = re.compile(r"([0-9][0-9,]*)\s+(?:up to\s+)?[A-Za-z]")
 
 
+# Older papers say "Caucasian" where the catalog's own vocabulary says
+# European. Dropping the row on the floor would lose the ancestry-transfer
+# warning, which is the whole reason this field is parsed.
+ANCESTRY_SYNONYMS = {"European": ("Caucasian", "White")}
+
+
+@functools.lru_cache(maxsize=None)
+def _term_re(term: str) -> re.Pattern[str]:
+    """Whole-word matcher for one ancestry label, built once per label."""
+    spellings = (term,) + ANCESTRY_SYNONYMS.get(term, ())
+    alternatives = "|".join(re.escape(s.lower()) for s in spellings)
+    return re.compile(rf"\b(?:{alternatives})\b")
+
+
 def parse_cohort(text: str) -> tuple[int | None, tuple[str, ...]]:
     """Pull a headcount and the ancestry labels out of a sample description.
 
@@ -81,13 +96,19 @@ def parse_cohort(text: str) -> tuple[int | None, tuple[str, ...]]:
     found = []
     lowered = text.lower()
     for term in ANCESTRY_TERMS:
-        if term.lower() in lowered and term not in found:
-            # "African" would otherwise also match "African American".
-            if term == "African" and "african american" in lowered and "sub-saharan" not in lowered:
-                continue
-            if term == "Asian" and ("east asian" in lowered or "south asian" in lowered):
-                continue
-            found.append(term)
+        # Match on word boundaries. A bare substring test read "Caucasian" as
+        # Asian and "unrelated" as NR, and the second one was the damaging
+        # case: a stray NR made the ancestry tuple longer than ("European",),
+        # which silently suppressed the transfer warning further down.
+        if not _term_re(term).search(lowered) or term in found:
+            continue
+        # These two survive word boundaries, because the narrower label really
+        # does contain the broader one as a whole word.
+        if term == "African" and "african american" in lowered and "sub-saharan" not in lowered:
+            continue
+        if term == "Asian" and ("east asian" in lowered or "south asian" in lowered):
+            continue
+        found.append(term)
     return (total or None), tuple(found)
 
 
@@ -97,6 +118,29 @@ def _risk_allele(strongest: str) -> str | None:
         return None
     allele = strongest.rsplit("-", 1)[1].strip().upper()
     return allele if allele in ("A", "C", "G", "T") else None
+
+
+def risk_alleles(strongest: str) -> dict[str, str]:
+    """Map each rsID in a STRONGEST field to *its own* risk allele.
+
+    The catalog writes multi-SNP associations as
+    "rs1015362-G; rs4911414-T". Reading only the last allele and applying it to
+    every SNP in the row inverts carrier status in both directions at once: a
+    `TT` carrier of rs1015362 was reported homozygous for a risk allele the
+    study assigned to a different variant, and the `GG` carrier who actually
+    had it was reported as not carrying it.
+    """
+    out: dict[str, str] = {}
+    for token in strongest.replace(";", ",").replace(" x ", ",").split(","):
+        token = token.strip()
+        if "-" not in token:
+            continue
+        rsid, _, allele = token.rpartition("-")
+        rsid = rsid.strip().lower()
+        allele = allele.strip().upper()
+        if rsid.startswith("rs") and allele in ("A", "C", "G", "T"):
+            out[rsid] = allele
+    return out
 
 
 def _iter_records(path: Path) -> Iterator[tuple]:
@@ -120,10 +164,19 @@ def _iter_records(path: Path) -> Iterator[tuple]:
                     p_value = float(row.get(_COLUMNS["p_value"]) or "")
                 except ValueError:
                     continue
-                if not p_value or p_value > SIGNIFICANCE_THRESHOLD:
+                # A p-value that underflows to 0.0 is the strongest result in
+                # the catalog, not a missing one: rs7903146 (TCF7L2, type 2
+                # diabetes) is reported at 6e-447, which no float can hold.
+                # Blanks already died in the except above, so testing falsiness
+                # here dropped exactly the associations most worth keeping.
+                if p_value > SIGNIFICANCE_THRESHOLD:
                     continue
 
-                risk = _risk_allele(row.get(_COLUMNS["strongest"]) or "")
+                strongest = row.get(_COLUMNS["strongest"]) or ""
+                per_snp_risk = risk_alleles(strongest)
+                # Single-SNP rows often omit the rsID prefix in STRONGEST, so
+                # keep the whole-field reading as the fallback for those only.
+                fallback_risk = _risk_allele(strongest) if len(per_snp_risk) <= 1 else None
                 effect = (row.get(_COLUMNS["effect"]) or "").strip()
                 ci = (row.get(_COLUMNS["ci"]) or "").strip()
                 if effect and ci:
@@ -144,7 +197,7 @@ def _iter_records(path: Path) -> Iterator[tuple]:
                         continue
                     yield (
                         rsid,
-                        risk,
+                        per_snp_risk.get(rsid.lower(), fallback_risk),
                         (row.get(_COLUMNS["trait"]) or "").strip(),
                         (row.get(_COLUMNS["mapped"]) or "").strip(),
                         p_value,

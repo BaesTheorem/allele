@@ -149,8 +149,15 @@ class AlphaMissense:
         """
         if not call.chrom or not call.pos or not call.usable:
             return []
+        # These predictions are keyed by GRCh38 coordinate. A GRCh37 position
+        # can land on a real GRCh38 row for a different variant, which would
+        # attach "predicted likely pathogenic" to something the person does not
+        # have. Say nothing rather than something confidently wrong.
+        if call.build is not None and call.build != BUILD:
+            return []
         rows = self.conn.execute(
-            "SELECT * FROM alphamissense WHERE chrom=? AND pos=?", (call.chrom, call.pos)
+            "SELECT * FROM alphamissense WHERE chrom=? AND pos=? AND build=?",
+            (call.chrom, call.pos, BUILD),
         ).fetchall()
 
         out: list[Annotation] = []
@@ -171,6 +178,8 @@ class AlphaMissense:
                     source="alphamissense",
                     category="predicted",
                     title=f"predicted {row['class'].replace('_', ' ')} ({row['score']:.2f})",
+                    ref=row["ref"],
+                    alt=alt,
                     significance=row["class"].replace("_", " "),
                     zygosity=zygosity,
                     genotype=call.genotype,
